@@ -33,14 +33,16 @@ public class UserActivity
 	private String serverName;
 	private String ffmpegDir;
 	private String ffprobeDir;
+	private String videoDir;
 	public static DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss");
-	private CommandRegistry registry = new CommandRegistry("f!");
+	private CommandRegistry registry = new CommandRegistry("s!");
 
-	public UserActivity(IChannel c, IRole a, IRole u, String s, String f, String f2)
+	public UserActivity(IChannel c, IRole a, IRole u, String s, String f, String f2, String v)
 	{
 		this.serverName = s;
 		this.ffmpegDir = f;
 		this.ffprobeDir = f2;
+		this.videoDir = v;
 		channelLimiter = new ChannelLimiter(c);
 		adminRoleLimiter = new RoleLimiter(a);
 		userRoleLimiter = new RoleLimiter(a, u);
@@ -86,7 +88,7 @@ public class UserActivity
 				args.remove(0);
 			if (args.size() == 2)
 			{
-				File video = new File(DRI.dir + File.separator + "Videos" + File.separator + args.get(0));
+				File video = new File(videoDir + File.separator + args.get(0));
 				if (!video.exists())
 				{
 					logger.error("Video Not Found: {}", video.getAbsolutePath());
@@ -105,6 +107,9 @@ public class UserActivity
 				}
 				else
 				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("Summoning Frame...");
+					});
 					String command = ffmpegDir + " -ss " + args.get(1) + " -i \"" + video.getAbsolutePath() + "\" -t 1 -f image2 -frames:v 1 \""
 							+ DRI.dir + File.separator + "frame-" + args.get(0) + ".png\"";
 					try
@@ -169,13 +174,13 @@ public class UserActivity
 			else if (args.size() < 2)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do f!help frame for more information");
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for more information");
 				});
 			}
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do f!help frame for more information");
+					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for more information");
 				});
 			}
 		}).build();
@@ -196,7 +201,7 @@ public class UserActivity
 				args.remove(0);
 			if (args.size() == 1)
 			{
-				File video = new File(DRI.dir + File.separator + "Videos" + File.separator + args.get(0));
+				File video = new File(videoDir + File.separator + args.get(0));
 				if (!video.exists())
 				{
 					logger.error("Video Not Found: {}", video.getAbsolutePath());
@@ -208,7 +213,7 @@ public class UserActivity
 				else
 				{
 					String command = ffprobeDir + " -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 -sexagesimal \""
-							+ DRI.dir + File.separator + "Videos" + File.separator + args.get(0) + "\"";
+							+ video.getAbsolutePath() + "\"";
 					try
 					{
 						logger.info("Command: ({})", command);
@@ -260,13 +265,13 @@ public class UserActivity
 			else if (args.size() < 1)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do f!help time for more information");
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help time for more information");
 				});
 			}
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do f!help time for more information");
+					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help time for more information");
 				});
 			}
 		}).build();
@@ -285,7 +290,7 @@ public class UserActivity
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			File videos = new File(DRI.dir + File.separator + "Videos");
+			File videos = new File(videoDir);
 			if (!videos.exists())
 			{
 				RequestBuffer.request(() -> {
@@ -301,16 +306,28 @@ public class UserActivity
 			}
 			else
 			{
-				StringBuilder s = new StringBuilder("Avaliable Video Files");
+				StringBuilder s = new StringBuilder("Avaliable Video Files in: *" + videoDir + "*");
 				File[] vlist = videos.listFiles();
 				s.append("\n```\n");
 				for (int x = 0; x < vlist.length; x++)
 				{
+					String nextLine = (x + 1) + ". " + vlist[x].getName() + "\n";
+					if((s.length() + nextLine.length()) >= 1996)
+					{
+						//Send in Chunks
+						s.append("```");
+						final String stringPart = s.toString();
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(stringPart);
+						});
+						s = new StringBuilder("```\n");
+					}
 					s.append((x + 1) + ". " + vlist[x].getName() + "\n");
 				}
 				s.append("```");
+				final String finalStringPart = s.toString();
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(s.toString());
+					ctx.getChannel().sendMessage(finalStringPart);
 				});
 			}
 		}).build();
@@ -335,7 +352,7 @@ public class UserActivity
 			}
 			else if (args.size() == 0)
 			{ // !info
-				message = "- **Author:** Christian77777\n" + "- **Programming Language:** Java\n" + "- **Discord Connection Library:** Discord4J\n"
+				message = "- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n" + "- **Programming Language:** Java\n" + "- **Discord Connection Library:** Discord4J\n"
 						+ "- **Discord (Command) Library:** Commands4J";
 			}
 			else
@@ -364,23 +381,23 @@ public class UserActivity
 				ArrayList<Boolean> inline = new ArrayList<Boolean>();
 				//Field Titles: 50
 				//Field Values: 175
-				textTitle.add("f!debugDB");
+				textTitle.add("s!debugDB");
 				textValue.add("Freeze code in IDE to see fields");
 				inline.add(false);
 				//ffmpeg -ss ##:##:##.### -i filename.mkv -t 1 -f image2 frame-[].jpg
-				textTitle.add("f!frame [Filename] [Timecode]");
+				textTitle.add("s!frame [Filename] [Timecode]");
 				textValue.add("Extract Frame from video at timecode and upload to Discord");
 				inline.add(false);
-				textTitle.add("f!time [Filename]");
+				textTitle.add("s!time [Filename]");
 				textValue.add("Returns the length of the video as a time code to know how long the video is");
 				inline.add(false);
-				textTitle.add("f!list");
+				textTitle.add("s!list");
 				textValue.add("Lists all Videos in accessible folder that can be accessed");
 				inline.add(false);
-				textTitle.add("f!info");
+				textTitle.add("s!info");
 				textValue.add("Display Info about the bot");
 				inline.add(false);
-				textTitle.add("f!help <Command>");
+				textTitle.add("s!help <Command>");
 				textValue.add("Display Command list with descriptions, or command details");
 				inline.add(false);
 				int pageCount = ((int) Math.ceil(textTitle.size() / 25.0));
@@ -418,13 +435,13 @@ public class UserActivity
 					case "frame":
 						RequestBuffer.request(() -> {
 							ctx.getChannel().sendMessage(
-									"Extracts frame from video and uploads to Discord\nUsage: f!frame [filename] [Timecode]\n[Filename]: Name of File, use f!list to see avaliable files\n[Timecode]: closest time to extract frame from, in this format ##:##:##.###");
+									"Extracts frame from video and uploads to Discord\nUsage: s!frame [filename] [Timecode]\n[Filename]: Name of File, use s!list to see avaliable files\n[Timecode]: closest time to extract frame from, in this format ##:##:##.###");
 						}).get();
 						break;
 					case "time":
 						RequestBuffer.request(() -> {
 							ctx.getChannel().sendMessage(
-									"Finds the length of time a video has\nUsage: f!time [filename]\n[Filename]: Name of File, use f!list to see avaliable files");
+									"Finds the length of time a video has\nUsage: s!time [filename]\n[Filename]: Name of File, use s!list to see avaliable files");
 						}).get();
 						break;
 					case "list":
@@ -444,7 +461,7 @@ public class UserActivity
 						break;
 					default:
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Unknown Command!\nUse f!help for Command List\nUsage: **f!help** <Command Name>");
+							ctx.getChannel().sendMessage("Unknown Command!\nUse s!help for Command List\nUsage: **s!help** <Command Name>");
 						}).get();
 						break;
 				}

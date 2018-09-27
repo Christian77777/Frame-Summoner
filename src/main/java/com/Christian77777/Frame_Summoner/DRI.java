@@ -55,7 +55,7 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("0.0.1");
+	public static String version = new String("1.1.0");
 	private static String token = new String("fake");
 	private static String serverName = new String("JoeBlow's Server");
 	private static String adminChannelName = new String("bot-spam");
@@ -63,6 +63,7 @@ public class DRI implements IListener<ReadyEvent>
 	private static String userRoleName = new String("user");
 	private static String ffmpegDir = null;
 	private static String ffprobeDir = null;
+	private static String videoDir = null;
 	private IDiscordClient api;
 
 	/**
@@ -82,11 +83,6 @@ public class DRI implements IListener<ReadyEvent>
 
 		DRI.checkIfSingleInstance();
 
-		File videos = new File(dir + File.separator + "Videos");
-		if(!videos.exists())
-		{
-			videos.mkdirs();
-		}
 		try (FileReader file = new FileReader(dir + File.separator + "values.txt"); BufferedReader in = new BufferedReader(file);)
 		{
 			token = in.readLine().substring(6);
@@ -97,9 +93,10 @@ public class DRI implements IListener<ReadyEvent>
 			userRoleName = in.readLine().substring(13);
 			ffmpegDir = in.readLine().substring(21);
 			ffprobeDir = in.readLine().substring(22);
+			videoDir = in.readLine().substring(16);
 			logger.info(
-					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\\n\\tFFprobe Path: {}",
-					token.substring(token.length() - 6, token.length() - 1), serverName, adminChannelName, adminRoleName, userRoleName, ffprobeDir);
+					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\n\tFFprobe Path: {}\n\tVideo Path: {}",
+					token.substring(token.length() - 6, token.length() - 1), serverName, adminChannelName, adminRoleName, userRoleName, ffmpegDir, ffprobeDir, videoDir);
 		}
 		catch (StringIndexOutOfBoundsException | NullPointerException e)
 		{
@@ -118,9 +115,10 @@ public class DRI implements IListener<ReadyEvent>
 				printer.println("UserRoleName=user");
 				printer.println("ffmpeg.exe File Path=*OS path to ffmpeg.exe*");
 				printer.println("ffprobe.exe File Path=*OS path to ffprobe.exe*");
+				printer.println("Video Directory=Choose the directory of the videos to access here");
 				printer.flush();
 				printer.close();
-				logger.warn("Created values.txt\nPlease Edit before Using Program");
+				logger.warn("Created values.txt\nPlease Edit before Using Program\n Remember to not use Quotation Marks when specifying file paths with spaces");
 			}
 			catch (IOException e)
 			{
@@ -132,6 +130,11 @@ public class DRI implements IListener<ReadyEvent>
 		{
 			logger.fatal("IO Exception While Reading Parameters", o);
 			System.exit(20);
+		}
+		File videos = new File(videoDir);
+		if(!videos.exists())
+		{
+			videos.mkdirs();
 		}
 		connectToDiscord();
 	}
@@ -210,9 +213,11 @@ public class DRI implements IListener<ReadyEvent>
 			logger.fatal("File Path for FFprobe Rejected, please put the correct path in the values.txt file and restart.");
 			System.exit(1);
 		}
-		if (adminChannel != null && adminRole != null && userRole != null)
+		if(!new File(videoDir).exists() || !new File(videoDir).isDirectory())
+			videoDir = null;
+		if (adminChannel != null && adminRole != null && userRole != null && videoDir != null)
 		{
-			UserActivity actions = new UserActivity(adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir);
+			UserActivity actions = new UserActivity(adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir, videoDir);
 			api.getDispatcher().registerListener(new CommandListener(actions.getRegistry()));
 			adminChannel.sendMessage("Frame Extractor Started");
 		}
@@ -224,6 +229,8 @@ public class DRI implements IListener<ReadyEvent>
 				logger.fatal("Admin Role Not Found!");
 			if (userRole == null)
 				logger.fatal("User Role Not Found!");
+			if (videoDir == null)
+				logger.fatal("Video Directory Invalid!");
 		}
 	}
 
