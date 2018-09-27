@@ -23,8 +23,8 @@ along with FTUServerBot.  If not, see <http://www.gnu.org/licenses/>.
 			<PatternLayout
 				pattern="%highlight{[%-5level] %d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %c{1} - %msg%n}{FATAL=red, ERROR=red, WARN=yellow, INFO=White, DEBUG=Cyan, TRACE=Blue}" />
 		</Appender>
-		<RollingFile name="FILE" fileName="${sys:directory}/temp/foxtrot.log"
-			filePattern="${sys:directory}/temp/server-%i.log">
+		<RollingFile name="FILE" fileName="${sys:directory}/temp/FSserver.log"
+			filePattern="${sys:directory}/temp/FSserver-%i.log">
 			<Layout type="PatternLayout" pattern="[%-5level] %d{yyyy-MM-dd HH:mm:ss.SSS} %c{1} - %msg%n" />
 			<Policies>
 				<OnStartupTriggeringPolicy minSize="1" />

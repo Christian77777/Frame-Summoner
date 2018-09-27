@@ -5,7 +5,7 @@
 
 	<groupId>com.Christian77777</groupId>
 	<artifactId>Frame-Summoner</artifactId>
-	<version>1.1.0</version>
+	<version>1.1.1</version>
 	<packaging>jar</packaging>
 
 	<name>Frame-Summoner</name>
@@ -71,7 +71,7 @@
 					</descriptors>
 					<archive>
 						<manifest>
-							<mainClass>com.FTUServerBot.main.DRI</mainClass>
+							<mainClass>com.Christian77777.Frame_Summoner.DRI</mainClass>
 						</manifest>
 					</archive>
 					<appendAssemblyId>false</appendAssemblyId>

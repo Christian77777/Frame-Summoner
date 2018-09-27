@@ -55,7 +55,7 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("1.1.0");
+	public static String version = new String("1.1.1");
 	private static String token = new String("fake");
 	private static String serverName = new String("JoeBlow's Server");
 	private static String adminChannelName = new String("bot-spam");
