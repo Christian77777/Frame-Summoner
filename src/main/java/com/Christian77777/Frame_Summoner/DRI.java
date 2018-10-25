@@ -19,6 +19,13 @@
 
 package com.Christian77777.Frame_Summoner;
 
+import java.awt.Image;
+import java.awt.MenuItem;
+import java.awt.PopupMenu;
+import java.awt.SystemTray;
+import java.awt.TrayIcon;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -34,6 +41,8 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.util.concurrent.TimeUnit;
+import javax.swing.ImageIcon;
+import javax.swing.JOptionPane;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.darichey.discord.CommandListener;
@@ -55,16 +64,21 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("1.1.1");
-	private static String token = new String("fake");
-	private static String serverName = new String("JoeBlow's Server");
-	private static String adminChannelName = new String("bot-spam");
-	private static String adminRoleName = new String("ADMIN");
-	private static String userRoleName = new String("user");
-	private static String ffmpegDir = null;
-	private static String ffprobeDir = null;
-	private static String videoDir = null;
+	public static String version = new String("1.2.0");
+	public static Image image = new ImageIcon(DRI.class.getResource("resources/evo.ico")).getImage();
+	private String token = new String("fake");
+	private String serverName = new String("JoeBlow's Server");
+	private String adminChannelName = new String("bot-spam");
+	private String adminRoleName = new String("ADMIN");
+	private String userRoleName = new String("user");
+	private String ffmpegDir = null;
+	private String ffprobeDir = null;
+	private String videoDir = null;
 	private IDiscordClient api;
+	private CommandListener actions;
+	private IChannel adminChannel = null;
+	private IRole adminRole = null;
+	private IRole userRole = null;
 
 	/**
 	 * @param args
@@ -82,61 +96,9 @@ public class DRI implements IListener<ReadyEvent>
 		logger.info("Directory name found: {}", dir);
 
 		DRI.checkIfSingleInstance();
-
-		try (FileReader file = new FileReader(dir + File.separator + "values.txt"); BufferedReader in = new BufferedReader(file);)
-		{
-			token = in.readLine().substring(6);
-			serverName = in.readLine();
-			serverName = serverName.substring(5, Math.min(40, serverName.length()));
-			adminChannelName = in.readLine().substring(17);
-			adminRoleName = in.readLine().substring(14);
-			userRoleName = in.readLine().substring(13);
-			ffmpegDir = in.readLine().substring(21);
-			ffprobeDir = in.readLine().substring(22);
-			videoDir = in.readLine().substring(16);
-			logger.info(
-					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\n\tFFprobe Path: {}\n\tVideo Path: {}",
-					token.substring(token.length() - 6, token.length() - 1), serverName, adminChannelName, adminRoleName, userRoleName, ffmpegDir, ffprobeDir, videoDir);
-		}
-		catch (StringIndexOutOfBoundsException | NullPointerException e)
-		{
-			logger.fatal("Could not read values.txt\n Please edit before rerunning Program\nOr Delete to generate a clean values.txt");
-			System.exit(20);
-		}
-		catch (FileNotFoundException o)
-		{
-			try
-			{
-				PrintWriter printer = new PrintWriter(dir + File.separator + "values.txt");
-				printer.println("Token=reallyLongWord");
-				printer.println("Name=JoeBlow's Server");
-				printer.println("AdminChannelName=bot-spam");
-				printer.println("AdminRoleName=ADMIN");
-				printer.println("UserRoleName=user");
-				printer.println("ffmpeg.exe File Path=*OS path to ffmpeg.exe*");
-				printer.println("ffprobe.exe File Path=*OS path to ffprobe.exe*");
-				printer.println("Video Directory=Choose the directory of the videos to access here");
-				printer.flush();
-				printer.close();
-				logger.warn("Created values.txt\nPlease Edit before Using Program\n Remember to not use Quotation Marks when specifying file paths with spaces");
-			}
-			catch (IOException e)
-			{
-				logger.fatal("Failed to Generate values.txt: ", e);
-			}
-			System.exit(20);
-		}
-		catch (IOException o)
-		{
-			logger.fatal("IO Exception While Reading Parameters", o);
-			System.exit(20);
-		}
-		File videos = new File(videoDir);
-		if(!videos.exists())
-		{
-			videos.mkdirs();
-		}
-		connectToDiscord();
+		DRI dri = new DRI();
+		dri.readConfig();
+		dri.connectToDiscord();
 	}
 
 	@Override
@@ -145,9 +107,6 @@ public class DRI implements IListener<ReadyEvent>
 		Thread.currentThread().setName("DiscordConnectionThread");
 		this.api = event.getClient();
 		logger.info("Connected to Discord");
-		IChannel adminChannel = null;
-		IRole adminRole = null;
-		IRole userRole = null;
 		for (IChannel ch : api.getChannels())
 		{
 			if (ch.getName().equals(adminChannelName))
@@ -213,12 +172,14 @@ public class DRI implements IListener<ReadyEvent>
 			logger.fatal("File Path for FFprobe Rejected, please put the correct path in the values.txt file and restart.");
 			System.exit(1);
 		}
-		if(!new File(videoDir).exists() || !new File(videoDir).isDirectory())
+		if (!new File(videoDir).exists() || !new File(videoDir).isDirectory())
 			videoDir = null;
 		if (adminChannel != null && adminRole != null && userRole != null && videoDir != null)
 		{
-			UserActivity actions = new UserActivity(adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir, videoDir);
-			api.getDispatcher().registerListener(new CommandListener(actions.getRegistry()));
+			//api.changePresence(status, activity, text);
+			actions = new CommandListener(
+					new UserActivity(adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir, videoDir).getRegistry());
+			api.getDispatcher().registerListener(actions);
 			adminChannel.sendMessage("Frame Extractor Started");
 		}
 		else
@@ -234,20 +195,155 @@ public class DRI implements IListener<ReadyEvent>
 		}
 	}
 
-	private DRI(IDiscordClient api)
+	private void startMenu()
 	{
-		this.api = api;
-		api.getDispatcher().registerListener(this);
+		if (!SystemTray.isSupported())
+		{
+			System.out.println("System Menu is not supported on this OS");
+			return;
+		}
+		PopupMenu menu = new PopupMenu();
+		SystemTray tray = SystemTray.getSystemTray();
+		MenuItem refresh = new MenuItem("Send Message");
+		MenuItem request = new MenuItem("Send Message");
+		MenuItem restart = new MenuItem("Restart");
+		MenuItem quit = new MenuItem("Quit");
+
+		quit.addActionListener(new ActionListener()
+		{
+			@Override
+			public void actionPerformed(ActionEvent e)
+			{
+				api.getDispatcher().unregisterListener(actions);
+				api.logout();
+				System.exit(0);
+			}
+		});
+
+		restart.addActionListener(new ActionListener()
+		{
+			@Override
+			public void actionPerformed(ActionEvent e)
+			{
+				api.getDispatcher().unregisterListener(actions);
+				api.logout();
+				readConfig();
+				connectToDiscord();
+			}
+		});
+
+		request.addActionListener(new ActionListener()
+		{
+			@Override
+			public void actionPerformed(ActionEvent e)
+			{
+				String s = (String) JOptionPane.showInputDialog(null, "Send Message or Command from Frame-Summoner Discord Bot",
+						"Frame-Summoner Message", JOptionPane.INFORMATION_MESSAGE, new ImageIcon(image), null, null);
+				adminChannel.sendMessage(s.substring(0, Math.min(s.length(), 2000)));
+			}
+		});
+		refresh.addActionListener(new ActionListener()
+		{
+			@Override
+			public void actionPerformed(ActionEvent e)
+			{
+				try
+				{
+					int fileCount = new File(videoDir).listFiles().length;
+				}
+				catch (NullPointerException f)
+				{
+					logger.error("File Path Provided in values.txt invalid", f);
+				}
+			}
+		});
+
+		TrayIcon icon = new TrayIcon(image, "Frame-Summoner Discord Bot", menu);
 	}
 
-	public static DRI connectToDiscord()
+	private void readConfig()
 	{
-		DRI d = null;
+		try (FileReader file = new FileReader(dir + File.separator + "values.txt"); BufferedReader in = new BufferedReader(file);)
+		{
+			token = in.readLine().substring(6);
+			serverName = in.readLine();
+			serverName = serverName.substring(5, Math.min(40, serverName.length()));
+			adminChannelName = in.readLine().substring(17);
+			adminRoleName = in.readLine().substring(14);
+			userRoleName = in.readLine().substring(13);
+			ffmpegDir = in.readLine().substring(21);
+			ffprobeDir = in.readLine().substring(22);
+			videoDir = in.readLine().substring(16);
+			logger.info(
+					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\n\tFFprobe Path: {}\n\tVideo Path: {}",
+					token.substring(token.length() - 6, token.length() - 1), serverName, adminChannelName, adminRoleName, userRoleName, ffmpegDir,
+					ffprobeDir, videoDir);
+		}
+		catch (StringIndexOutOfBoundsException | NullPointerException e)
+		{
+			logger.fatal("Could not read values.txt\n Please edit before rerunning Program\nOr Delete to generate a clean values.txt");
+			System.exit(20);
+		}
+		catch (FileNotFoundException o)
+		{
+			try
+			{
+				PrintWriter printer = new PrintWriter(dir + File.separator + "values.txt");
+				printer.println("Token=reallyLongWord");
+				printer.println("Name=JoeBlow's Server");
+				printer.println("AdminChannelName=bot-spam");
+				printer.println("AdminRoleName=ADMIN");
+				printer.println("UserRoleName=user");
+				printer.println("ffmpeg.exe File Path=*OS path to ffmpeg.exe*");
+				printer.println("ffprobe.exe File Path=*OS path to ffprobe.exe*");
+				printer.println("Video Directory=Choose the directory of the videos to access here");
+				printer.flush();
+				printer.close();
+				logger.warn(
+						"Created values.txt\nPlease Edit before Using Program\n Remember to not use Quotation Marks when specifying file paths with spaces");
+			}
+			catch (IOException e)
+			{
+				logger.fatal("Failed to Generate values.txt: ", e);
+			}
+			System.exit(20);
+		}
+		catch (IOException o)
+		{
+			logger.fatal("IO Exception While Reading Parameters", o);
+			System.exit(20);
+		}
+		File videos = new File(videoDir);
+		if (!videos.exists())
+		{
+			videos.mkdirs();
+		}
+	}
+
+	private DRI()
+	{
+
+	}
+
+	public void connectToDiscord()
+	{
+		if (api != null)
+		{
+			api.logout();
+			try
+			{
+				Thread.sleep(2000);
+			}
+			catch (InterruptedException e)
+			{
+				e.printStackTrace();
+			}
+		}
 		ClientBuilder clientBuilder = new ClientBuilder(); // Creates the ClientBuilder instance
 		clientBuilder.withToken(token); // Adds the login info to the builder
 		try
 		{
-			d = new DRI(clientBuilder.login()); // Creates and logs in the client instance
+			api = clientBuilder.login(); // Creates and logs in the client instance
 		}
 		catch (DiscordException e)
 		{ // This is thrown if there was a problem building the client
@@ -255,7 +351,6 @@ public class DRI implements IListener<ReadyEvent>
 			logger.catching(e);
 			System.exit(21);
 		}
-		return d;
 	}
 
 	@SuppressWarnings("resource")
