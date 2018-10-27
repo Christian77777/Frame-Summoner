@@ -19,6 +19,7 @@
 
 package com.Christian77777.Frame_Summoner;
 
+import java.awt.AWTException;
 import java.awt.Image;
 import java.awt.MenuItem;
 import java.awt.PopupMenu;
@@ -64,8 +65,7 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("1.2.0");
-	public static Image image = new ImageIcon(DRI.class.getResource("resources/evo.ico")).getImage();
+	public static String version = new String("1.2.1");
 	private String token = new String("fake");
 	private String serverName = new String("JoeBlow's Server");
 	private String adminChannelName = new String("bot-spam");
@@ -94,7 +94,7 @@ public class DRI implements IListener<ReadyEvent>
 		System.setProperty("directory", dir);
 		logger = LogManager.getLogger();
 		logger.info("Directory name found: {}", dir);
-
+		TrayMenu menu = new TrayMenu();
 		DRI.checkIfSingleInstance();
 		DRI dri = new DRI();
 		dri.readConfig();
@@ -193,72 +193,6 @@ public class DRI implements IListener<ReadyEvent>
 			if (videoDir == null)
 				logger.fatal("Video Directory Invalid!");
 		}
-	}
-
-	private void startMenu()
-	{
-		if (!SystemTray.isSupported())
-		{
-			System.out.println("System Menu is not supported on this OS");
-			return;
-		}
-		PopupMenu menu = new PopupMenu();
-		SystemTray tray = SystemTray.getSystemTray();
-		MenuItem refresh = new MenuItem("Send Message");
-		MenuItem request = new MenuItem("Send Message");
-		MenuItem restart = new MenuItem("Restart");
-		MenuItem quit = new MenuItem("Quit");
-
-		quit.addActionListener(new ActionListener()
-		{
-			@Override
-			public void actionPerformed(ActionEvent e)
-			{
-				api.getDispatcher().unregisterListener(actions);
-				api.logout();
-				System.exit(0);
-			}
-		});
-
-		restart.addActionListener(new ActionListener()
-		{
-			@Override
-			public void actionPerformed(ActionEvent e)
-			{
-				api.getDispatcher().unregisterListener(actions);
-				api.logout();
-				readConfig();
-				connectToDiscord();
-			}
-		});
-
-		request.addActionListener(new ActionListener()
-		{
-			@Override
-			public void actionPerformed(ActionEvent e)
-			{
-				String s = (String) JOptionPane.showInputDialog(null, "Send Message or Command from Frame-Summoner Discord Bot",
-						"Frame-Summoner Message", JOptionPane.INFORMATION_MESSAGE, new ImageIcon(image), null, null);
-				adminChannel.sendMessage(s.substring(0, Math.min(s.length(), 2000)));
-			}
-		});
-		refresh.addActionListener(new ActionListener()
-		{
-			@Override
-			public void actionPerformed(ActionEvent e)
-			{
-				try
-				{
-					int fileCount = new File(videoDir).listFiles().length;
-				}
-				catch (NullPointerException f)
-				{
-					logger.error("File Path Provided in values.txt invalid", f);
-				}
-			}
-		});
-
-		TrayIcon icon = new TrayIcon(image, "Frame-Summoner Discord Bot", menu);
 	}
 
 	private void readConfig()
