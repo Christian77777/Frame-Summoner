@@ -38,6 +38,7 @@ along with FTUServerBot.  If not, see <http://www.gnu.org/licenses/>.
             <includes>
                 <include>com/**/*</include>
                 <include>log4j2.xml</include>
+                <include>evo.gif</include>
             </includes>
         </fileSet>
     </fileSets>

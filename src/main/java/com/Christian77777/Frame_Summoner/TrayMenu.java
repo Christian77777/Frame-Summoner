@@ -94,7 +94,7 @@ public class TrayMenu
 			{
 				try
 				{
-					controller.disconnect("Shutting Down... byeee");
+					controller.disconnect("Shutting Down...");
 				}
 				catch (NullPointerException f)
 				{
