@@ -19,14 +19,6 @@
 
 package com.Christian77777.Frame_Summoner;
 
-import java.awt.AWTException;
-import java.awt.Image;
-import java.awt.MenuItem;
-import java.awt.PopupMenu;
-import java.awt.SystemTray;
-import java.awt.TrayIcon;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -46,14 +38,18 @@ import javax.swing.ImageIcon;
 import javax.swing.JOptionPane;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.darichey.discord.CommandContext;
 import com.darichey.discord.CommandListener;
 import sx.blah.discord.api.ClientBuilder;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.ReadyEvent;
+import sx.blah.discord.handle.obj.ActivityType;
 import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IRole;
+import sx.blah.discord.handle.obj.StatusType;
 import sx.blah.discord.util.DiscordException;
+import sx.blah.discord.util.RequestBuffer;
 
 /**
  * @author Christian
@@ -65,7 +61,8 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("1.2.1");
+	public static String version = new String("1.2.2");
+	public static TrayMenu menu;
 	private String token = new String("fake");
 	private String serverName = new String("JoeBlow's Server");
 	private String adminChannelName = new String("bot-spam");
@@ -74,6 +71,7 @@ public class DRI implements IListener<ReadyEvent>
 	private String ffmpegDir = null;
 	private String ffprobeDir = null;
 	private String videoDir = null;
+	private boolean changeDir = false;
 	private IDiscordClient api;
 	private CommandListener actions;
 	private IChannel adminChannel = null;
@@ -94,11 +92,10 @@ public class DRI implements IListener<ReadyEvent>
 		System.setProperty("directory", dir);
 		logger = LogManager.getLogger();
 		logger.info("Directory name found: {}", dir);
-		TrayMenu menu = new TrayMenu();
-		DRI.checkIfSingleInstance();
-		DRI dri = new DRI();
-		dri.readConfig();
-		dri.connectToDiscord();
+		checkIfSingleInstance();
+		TrayMenu menu;
+		menu = new TrayMenu();
+		menu.showMenu();
 	}
 
 	@Override
@@ -173,14 +170,31 @@ public class DRI implements IListener<ReadyEvent>
 			System.exit(1);
 		}
 		if (!new File(videoDir).exists() || !new File(videoDir).isDirectory())
+		{
+			logger.error("Video Directory invalid: {}", videoDir);
+			//New Thread spawned, needs own reference
+			final String vDir = videoDir;
+			String message;
+			if(changeDir)
+				message = "Video Directory Invalid!\n`" + vDir + "`\nUse s!dir [File Path (without quotes)] to change path and reboot";
+			else
+				message = "Video Directory Invalid!\n`" + vDir + "`\nEdit values.txt and reboot";
+			RequestBuffer.request(() -> {
+				adminChannel.sendMessage(message);
+			});
 			videoDir = null;
-		if (adminChannel != null && adminRole != null && userRole != null && videoDir != null)
+		}
+		if (adminChannel != null && adminRole != null && userRole != null)
 		{
 			//api.changePresence(status, activity, text);
 			actions = new CommandListener(
-					new UserActivity(adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir, videoDir).getRegistry());
+					new UserActivity(this, adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir, videoDir, changeDir).getRegistry());
 			api.getDispatcher().registerListener(actions);
-			adminChannel.sendMessage("Frame Extractor Started");
+			updateStatus();
+			RequestBuffer.request(() -> {
+				adminChannel.sendMessage("Frame Extractor Started");
+			});
+			menu.setupComplete();
 		}
 		else
 		{
@@ -190,8 +204,91 @@ public class DRI implements IListener<ReadyEvent>
 				logger.fatal("Admin Role Not Found!");
 			if (userRole == null)
 				logger.fatal("User Role Not Found!");
-			if (videoDir == null)
-				logger.fatal("Video Directory Invalid!");
+			//videoDir already handled
+		}
+	}
+
+	public void editVideoDirectory(String path, boolean alertDiscord, CommandContext ctx)
+	{
+		String[] storage = new String[9];
+		try (FileReader file = new FileReader(DRI.dir + File.separator + "values.txt"); BufferedReader in = new BufferedReader(file);)
+		{
+			for (int x = 0; x < 9; x++)
+			{
+				storage[x] = in.readLine();
+			}
+			storage[7] = storage[7].substring(0, 16) + path;
+		}
+		catch (StringIndexOutOfBoundsException | NullPointerException | IOException e)
+		{
+			logger.fatal("Could not read values.txt\n Please edit before rerunning Program\nOr Delete to generate a clean values.txt");
+			if (alertDiscord)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Failed to read prexisting values.txt, shutting down...");
+				});
+			}
+			System.exit(20);
+		}
+		try (PrintWriter printer = new PrintWriter(DRI.dir + File.separator + "values.txt");)
+		{
+			for (int x = 0; x < 9; x++)
+			{
+				printer.println(storage[x]);
+			}
+			printer.flush();
+			printer.close();
+		}
+		catch (IOException e)
+		{
+			logger.fatal("Failed to Generate values.txt: ", e);
+			if (alertDiscord)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Major Error rewriting values.txt, shutting down...");
+				});
+			}
+			System.exit(20);
+		}
+	}
+
+	public void disconnect(String message)
+	{
+		RequestBuffer.request(() -> {
+			adminChannel.sendMessage(message);
+		});
+		api.getDispatcher().unregisterListener(actions);
+		api.logout();
+		api = null;
+		actions = null;
+	}
+
+	public void sendCommand()
+	{
+		String s = (String) JOptionPane.showInputDialog(null, "Send Message or Command from Frame-Summoner Discord Bot", "Frame-Summoner Message",
+				JOptionPane.INFORMATION_MESSAGE, new ImageIcon(TrayMenu.image), null, null);
+		adminChannel.sendMessage(s.substring(0, Math.min(s.length(), 2000)));
+	}
+
+	public void updateStatus()
+	{
+		try
+		{
+			int fileCount = new File(videoDir).listFiles().length;
+			if (fileCount > 0)
+			{
+				api.changePresence(StatusType.ONLINE, ActivityType.WATCHING, fileCount + " videos");
+			}
+			else
+			{
+				api.changePresence(StatusType.IDLE, ActivityType.WATCHING, "nothing");
+			}
+		}
+		catch (NullPointerException f)
+		{
+			//logger.error("File Path Provided in values.txt invalid", f);
+			//Already reported
+			api.changePresence(StatusType.DND);
 		}
 	}
 
@@ -208,10 +305,11 @@ public class DRI implements IListener<ReadyEvent>
 			ffmpegDir = in.readLine().substring(21);
 			ffprobeDir = in.readLine().substring(22);
 			videoDir = in.readLine().substring(16);
+			changeDir = in.readLine().substring(35).equals("Y");
 			logger.info(
-					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\n\tFFprobe Path: {}\n\tVideo Path: {}",
+					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\n\tFFprobe Path: {}\n\tVideo Path: {}\n\tAllow Changing the Video Path: {}",
 					token.substring(token.length() - 6, token.length() - 1), serverName, adminChannelName, adminRoleName, userRoleName, ffmpegDir,
-					ffprobeDir, videoDir);
+					ffprobeDir, videoDir, changeDir);
 		}
 		catch (StringIndexOutOfBoundsException | NullPointerException e)
 		{
@@ -231,6 +329,7 @@ public class DRI implements IListener<ReadyEvent>
 				printer.println("ffmpeg.exe File Path=*OS path to ffmpeg.exe*");
 				printer.println("ffprobe.exe File Path=*OS path to ffprobe.exe*");
 				printer.println("Video Directory=Choose the directory of the videos to access here");
+				printer.println("AllowDirectoryChangeThroughDiscord=N");
 				printer.flush();
 				printer.close();
 				logger.warn(
@@ -254,9 +353,9 @@ public class DRI implements IListener<ReadyEvent>
 		}
 	}
 
-	private DRI()
+	public DRI()
 	{
-
+		readConfig();
 	}
 
 	public void connectToDiscord()
@@ -278,6 +377,7 @@ public class DRI implements IListener<ReadyEvent>
 		try
 		{
 			api = clientBuilder.login(); // Creates and logs in the client instance
+			api.getDispatcher().registerListener(this);
 		}
 		catch (DiscordException e)
 		{ // This is thrown if there was a problem building the client
@@ -356,7 +456,6 @@ public class DRI implements IListener<ReadyEvent>
 		}
 		catch (FileNotFoundException e1)
 		{
-			// TODO Auto-generated catch block
 			e1.printStackTrace();
 		}
 	}
