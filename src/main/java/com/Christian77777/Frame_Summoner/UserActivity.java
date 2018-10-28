@@ -17,8 +17,10 @@ import com.darichey.discord.CommandRegistry;
 import com.darichey.discord.limiter.ChannelLimiter;
 import com.darichey.discord.limiter.RoleLimiter;
 import com.darichey.discord.limiter.UserLimiter;
+import sx.blah.discord.handle.obj.ActivityType;
 import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IRole;
+import sx.blah.discord.handle.obj.StatusType;
 import sx.blah.discord.util.EmbedBuilder;
 import sx.blah.discord.util.RequestBuffer;
 
@@ -26,33 +28,44 @@ public class UserActivity
 {
 
 	private static Logger logger = LogManager.getLogger();
+	private DRI dri;
 	private ChannelLimiter channelLimiter;
-	@SuppressWarnings("unused")
 	private RoleLimiter adminRoleLimiter;
 	private RoleLimiter userRoleLimiter;
 	private String serverName;
 	private String ffmpegDir;
 	private String ffprobeDir;
 	private String videoDir;
+	private boolean changeDir;
 	public static DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss");
 	private CommandRegistry registry = new CommandRegistry("s!");
 
-	public UserActivity(IChannel c, IRole a, IRole u, String s, String f, String f2, String v)
+	public UserActivity(DRI dri, IChannel c, IRole a, IRole u, String s, String f, String f2, String v, boolean d)
 	{
+		this.dri = dri;
 		this.serverName = s;
 		this.ffmpegDir = f;
 		this.ffprobeDir = f2;
 		this.videoDir = v;
+		this.changeDir = d;
 		channelLimiter = new ChannelLimiter(c);
 		adminRoleLimiter = new RoleLimiter(a);
 		userRoleLimiter = new RoleLimiter(a, u);
 		//Debug Commands
 		addDebugCommand();
-		//Extraction Commands
-		addFrameCommand();
-		//Query Commands
-		addTimeCommand();
-		addListCommand();
+		//Admin Commands
+		if(changeDir)
+			addDirCommand();
+		else
+			addCantChangeCommand();
+		if (videoDir != null)
+		{
+			//Extraction Commands
+			addFrameCommand();
+			//Query Commands
+			addTimeCommand();
+			addListCommand();
+		}
 		//Generic Commands
 		addInfoCommand();
 		addHelpCommand();
@@ -107,6 +120,7 @@ public class UserActivity
 				}
 				else
 				{
+					ctx.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, args.get(0));
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage("Summoning Frame...");
 					});
@@ -183,6 +197,7 @@ public class UserActivity
 					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for more information");
 				});
 			}
+			dri.updateStatus();
 		}).build();
 		registry.register(frame, "frame");
 	}
@@ -208,10 +223,12 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage("Video Not Found");
 					});
+					dri.updateStatus();
 					return;
 				}
 				else
 				{
+					ctx.getClient().changePresence(StatusType.IDLE, ActivityType.LISTENING, args.get(0));
 					String command = ffprobeDir + " -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 -sexagesimal \""
 							+ video.getAbsolutePath() + "\"";
 					try
@@ -274,6 +291,7 @@ public class UserActivity
 					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help time for more information");
 				});
 			}
+			dri.updateStatus();
 		}).build();
 		registry.register(time, "time");
 	}
@@ -290,6 +308,7 @@ public class UserActivity
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
+			dri.updateStatus();
 			File videos = new File(videoDir);
 			if (!videos.exists())
 			{
@@ -311,8 +330,8 @@ public class UserActivity
 				s.append("\n```\n");
 				for (int x = 0; x < vlist.length; x++)
 				{
-					String nextLine = (x + 1) + ". " + vlist[x].getName() + "\n";
-					if((s.length() + nextLine.length()) >= 1996)
+					String nextLine = String.format("%3d", x + 1) + ". " + vlist[x].getName() + "\n";
+					if ((s.length() + nextLine.length()) >= 1996)
 					{
 						//Send in Chunks
 						s.append("```");
@@ -322,7 +341,7 @@ public class UserActivity
 						});
 						s = new StringBuilder("```\n");
 					}
-					s.append((x + 1) + ". " + vlist[x].getName() + "\n");
+					s.append(String.format("%3d", x + 1) + ". " + vlist[x].getName() + "\n");
 				}
 				s.append("```");
 				final String finalStringPart = s.toString();
@@ -332,6 +351,76 @@ public class UserActivity
 			}
 		}).build();
 		registry.register(list, "list");
+	}
+	
+	/**
+	 * Changes the Video Directory of bot after a quick Reboot
+	 */
+	private void addDirCommand()
+	{
+		Builder b = Command.builder();
+		b.limiter(channelLimiter);
+		b.limiter(adminRoleLimiter);
+		Command dir = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (args.size() > 0)
+			{ // more than 1 argument
+				String path = "";
+				for(String s:args)
+				{
+					path += s;
+				}
+				path = path.trim();
+				if(path.startsWith("`") && path.endsWith("`"))
+				{
+					path = path.substring(1, path.length()-2);
+				}
+				if (!new File(path).exists() || !new File(path).isDirectory())
+				{
+					final String path2 = new String(path);
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("File Path: `" + path2 + "`\nIs not valid, or does not exist.");
+					});
+					dri.updateStatus();
+					return;
+				}
+				logger.info("Updating Video Directory to: {}",path);
+				dri.editVideoDirectory(path, true, ctx);
+				final String path2 = new String(path);
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("File Path: `" + path2 + "`\nSaved to values.txt");
+				});
+				logger.info("Edited values.txt, now rebooting");
+				DRI.menu.manualRestart(500);
+			}
+			else if (args.size() == 0)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("No File Path Provided, please make sure to reboot path ");
+				});
+			}
+			else
+				throw new IllegalArgumentException("Negative number of Arguments!");
+		}).build();
+		registry.register(dir, "dir");
+	}
+	
+	/**
+	 * Maintains command, but alerts user that command disabled
+	 */
+	private void addCantChangeCommand()
+	{
+		Builder b = Command.builder();
+		b.limiter(channelLimiter);
+		b.limiter(adminRoleLimiter);
+		Command dir = b.onCalled(ctx -> {
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage("**Command Disabled**\nEdit property in values.txt and reboot to allow usage");
+			});
+		}).build();
+		registry.register(dir, "dir");
 	}
 
 	/**
@@ -345,6 +434,7 @@ public class UserActivity
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
+			dri.updateStatus();
 			String message;
 			if (args.size() > 0)
 			{ // more than 1 argument
@@ -352,8 +442,8 @@ public class UserActivity
 			}
 			else if (args.size() == 0)
 			{ // !info
-				message = "- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n" + "- **Programming Language:** Java\n" + "- **Discord Connection Library:** Discord4J\n"
-						+ "- **Discord (Command) Library:** Commands4J";
+				message = "- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n" + "- **Programming Language:** Java\n"
+						+ "- **Discord Connection Library:** Discord4J\n" + "- **Discord (Command) Library:** Commands4J";
 			}
 			else
 				throw new IllegalArgumentException("Negative number of Arguments!");
@@ -370,6 +460,7 @@ public class UserActivity
 		b.limiter(channelLimiter);
 		Command help = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			dri.updateStatus();
 			if (args.size() == 1 && args.get(0).equals(""))
 			{
 				args.remove(0);
@@ -383,6 +474,9 @@ public class UserActivity
 				//Field Values: 175
 				textTitle.add("s!debugDB");
 				textValue.add("Freeze code in IDE to see fields");
+				inline.add(false);
+				textTitle.add("s!dir");
+				textValue.add("Change the Video Directory of Bot, Admin only, enabled only in values.txt");
 				inline.add(false);
 				//ffmpeg -ss ##:##:##.### -i filename.mkv -t 1 -f image2 frame-[].jpg
 				textTitle.add("s!frame [Filename] [Timecode]");
@@ -430,6 +524,11 @@ public class UserActivity
 					case "debugDB":
 						RequestBuffer.request(() -> {
 							ctx.getChannel().sendMessage("Debug command, please ignore");
+						}).get();
+						break;
+					case "dir":
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Changes the Video Directory the bot monitors, requires Reboot.\nCommand can be completely disabled in values.txt and even then, is Admin Role only");
 						}).get();
 						break;
 					case "frame":
