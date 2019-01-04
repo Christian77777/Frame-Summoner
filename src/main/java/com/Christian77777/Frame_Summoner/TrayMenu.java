@@ -35,9 +35,10 @@ public class TrayMenu
 	private TrayIcon icon;
 	private DRI controller;
 
-	public TrayMenu()
+	public TrayMenu(DRI c)
 	{
 		DRI.menu = this;
+		controller = c;
 		if (!SystemTray.isSupported())
 		{
 			System.out.println("System Menu is not supported on this OS");
@@ -61,8 +62,6 @@ public class TrayMenu
 		icon = new TrayIcon(image, "Frame-Summoner Discord Bot", menu);
 		icon.setImageAutoSize(true);
 
-		controller = new DRI();
-		controller.connectToDiscord();
 		setCommands();
 	}
 
@@ -128,7 +127,7 @@ public class TrayMenu
 			@Override
 			public void actionPerformed(ActionEvent e)
 			{
-				controller.sendCommand();
+				controller.sendMessage();
 			}
 		});
 
@@ -137,7 +136,7 @@ public class TrayMenu
 			@Override
 			public void actionPerformed(ActionEvent e)
 			{
-				controller.updateStatus();
+				controller.refreshVideos();
 			}
 		});
 
@@ -164,7 +163,8 @@ public class TrayMenu
 					logger.warn("Desktop not supported");
 					try
 					{
-						//Windows Only, RIP
+						//Windows Only
+						@SuppressWarnings("unused")
 						Process p = new ProcessBuilder("notepad", DRI.dir + File.separator + "values.txt").start();
 					}
 					catch (IOException e2)

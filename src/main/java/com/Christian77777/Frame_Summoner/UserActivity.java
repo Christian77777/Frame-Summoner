@@ -1,26 +1,19 @@
 
 package com.Christian77777.Frame_Summoner;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Properties;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.darichey.discord.Command;
 import com.darichey.discord.Command.Builder;
 import com.darichey.discord.CommandRegistry;
-import com.darichey.discord.limiter.ChannelLimiter;
-import com.darichey.discord.limiter.RoleLimiter;
 import com.darichey.discord.limiter.UserLimiter;
-import sx.blah.discord.handle.obj.ActivityType;
-import sx.blah.discord.handle.obj.IChannel;
-import sx.blah.discord.handle.obj.IRole;
-import sx.blah.discord.handle.obj.StatusType;
+import sx.blah.discord.api.IDiscordClient;
+import sx.blah.discord.handle.impl.obj.ReactionEmoji;
 import sx.blah.discord.util.EmbedBuilder;
 import sx.blah.discord.util.RequestBuffer;
 
@@ -29,43 +22,37 @@ public class UserActivity
 
 	private static Logger logger = LogManager.getLogger();
 	private DRI dri;
-	private ChannelLimiter channelLimiter;
-	private RoleLimiter adminRoleLimiter;
-	private RoleLimiter userRoleLimiter;
-	private String serverName;
-	private String ffmpegDir;
-	private String ffprobeDir;
-	private String videoDir;
-	private boolean changeDir;
-	public static DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss");
-	private CommandRegistry registry = new CommandRegistry("s!");
+	private IDiscordClient c;
+	private Database db;
+	private Properties prop;
+	private Extractor extractor;
+	public static DateTimeFormatter milliDateFormat = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+	public static DateTimeFormatter secondDateFormat = DateTimeFormatter.ofPattern("HH:mm:ss");
+	private CommandRegistry registry = new CommandRegistry("fs!");
+	public static ReactionEmoji confirm = ReactionEmoji.of(new String(Character.toChars(9989)));
+	public static ReactionEmoji deny = ReactionEmoji.of(new String(Character.toChars(10062)));
 
-	public UserActivity(DRI dri, IChannel c, IRole a, IRole u, String s, String f, String f2, String v, boolean d)
+	public UserActivity(DRI dri, IDiscordClient c, Database d, Properties p)
 	{
 		this.dri = dri;
-		this.serverName = s;
-		this.ffmpegDir = f;
-		this.ffprobeDir = f2;
-		this.videoDir = v;
-		this.changeDir = d;
-		channelLimiter = new ChannelLimiter(c);
-		adminRoleLimiter = new RoleLimiter(a);
-		userRoleLimiter = new RoleLimiter(a, u);
+		this.c = c;
+		db = d;
+		prop = p;
+		extractor = new Extractor(c, d, p);
 		//Debug Commands
 		addDebugCommand();
 		//Admin Commands
-		if(changeDir)
+		addFullVerificationCommand();
+		addExecuteVerification();
+		if (prop.getProperty("AllowDirectoryChange").equals("Y"))
 			addDirCommand();
 		else
 			addCantChangeCommand();
-		if (videoDir != null)
-		{
-			//Extraction Commands
-			addFrameCommand();
-			//Query Commands
-			addTimeCommand();
-			addListCommand();
-		}
+		//Extraction Commands
+		addFrameCommand();
+		//Query Commands
+		addVerifyCommand();
+		addListCommand();
 		//Generic Commands
 		addInfoCommand();
 		addHelpCommand();
@@ -93,207 +80,230 @@ public class UserActivity
 	private void addFrameCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
-		b.limiter(userRoleLimiter);
+		//b.limiter(channelLimiter);
+		//b.limiter(userRoleLimiter);
 		Command frame = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			if (args.size() == 2)
+			//Permission to Respond
+			//Permission to Extract
+			boolean useOffset = true;
+			String filename = null;
+			String timecode = null;
+			Integer frameCount = null;
+			//TODO Deal with repeated flags
+			try
 			{
-				File video = new File(videoDir + File.separator + args.get(0));
-				if (!video.exists())
+				while (!args.isEmpty())
 				{
-					logger.error("Video Not Found: {}", video.getAbsolutePath());
-					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage("Video Not Found");
-					});
-					return;
-				}
-				else if (!checkOffset(args.get(1)))
-				{
-					logger.error("Offset Format Invalid: {}", args.get(1));
-					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage("Offset Format invalid, must be in ##:##:##.###");
-					});
-					return;
-				}
-				else
-				{
-					ctx.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, args.get(0));
-					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage("Summoning Frame...");
-					});
-					String command = ffmpegDir + " -ss " + args.get(1) + " -i \"" + video.getAbsolutePath() + "\" -t 1 -f image2 -frames:v 1 \""
-							+ DRI.dir + File.separator + "frame-" + args.get(0) + ".png\"";
-					try
+					String arg = assembleString(args);
+					if (arg.startsWith("-"))
 					{
-
-						logger.info("Command: ({})", command);
-						Process r = Runtime.getRuntime().exec(command);
-						StreamGobbler reader = new StreamGobbler(r.getInputStream(), true);
-						StreamGobbler eater = new StreamGobbler(r.getErrorStream(), true);
-						reader.start();
-						eater.start();
-						int exitValue = r.waitFor();
-						if (exitValue == 0)
+						switch (arg)
 						{
-							logger.info("Process Completed");
-							File result = new File(DRI.dir + File.separator + "frame-" + args.get(0) + ".png");
-							RequestBuffer.request(() -> {
+							case "-o":
+								useOffset = false;
+								break;
+							case "-f":
 								try
 								{
-									ctx.getChannel().sendFile(ctx.getAuthor().mention() + " Frame from video " + args.get(0) + " at " + args.get(1),
-											result);
-									logger.info("File Uploaded");
-									if (result.delete())
-										logger.info("Temp Frame Deleted");
-									else
-										logger.error("Unable to Delete Frame");
+									frameCount = Integer.valueOf(assembleString(args));
+									if (frameCount <= 0 || frameCount > 1000)
+									{
+										final int frameCount2 = frameCount;
+										RequestBuffer.request(() -> {
+											return ctx.getChannel()
+													.sendMessage("Invalid Frame Count value: `" + frameCount2 + "`! Valid range between 1 and 1000");
+										});
+										return;
+									}
 								}
-								catch (FileNotFoundException e)
+								catch (NumberFormatException e)
 								{
-									logger.error("File Not Found: {}", result.getAbsolutePath());
-									logger.catching(e);
+									final int frameCount2 = frameCount;
 									RequestBuffer.request(() -> {
-										ctx.getChannel().sendMessage("Extracted Frame not found!");
+										return ctx.getChannel().sendMessage("Frame Count value: " + frameCount2 + "\nnot a number!");
 									});
+									return;
 								}
-							});
+								break;
+							default:
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Unknown Flag! Do s!help frame for proper usage");
+								});
+								return;
 						}
-						else
+					}
+					else if (filename == null)
+					{
+						filename = arg;
+					}
+					else if (timecode == null)
+					{
+						if (!checkOffset(arg))
 						{
-							logger.error("Process Failed, Error: {}", exitValue);
+							logger.error("Offset Format Invalid: {}", timecode);
 							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage("Extraction Failed, check Console for errors");
+								ctx.getChannel().sendMessage("Offset Format invalid, must be in ##:##:##.### or ##:##:##");
 							});
+							return;
 						}
+						timecode = arg;
 					}
-					catch (IOException e1)
+					else
 					{
-						logger.catching(e1);
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Could not start Process.");
+							ctx.getChannel().sendMessage("Duplicate Filename or Timecode! Do s!help frame for proper usage");
 						});
-					}
-					catch (InterruptedException e2)
-					{
-						logger.catching(e2);
-						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Interruption Exception, process not completed yet.");
-						});
+						return;
 					}
 				}
 			}
-			else if (args.size() < 2)
+			catch (IndexOutOfBoundsException e)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for more information");
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
 				});
+				return;
+			}
+			if (filename != null && timecode != null)//Required Parameters
+			{
+				extractor.requestFrame(ctx, filename, timecode, frameCount, useOffset);
 			}
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for more information");
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
 				});
 			}
-			dri.updateStatus();
 		}).build();
 		registry.register(frame, "frame");
+	}
+
+	private void addRefreshVideosCommand()
+	{
+		
+	}
+
+	private void addFullVerificationCommand()
+	{
+		Builder b = Command.builder();
+		//b.limiter(channelLimiter);
+		//b.limiter(userRoleLimiter);
+		Command fullVerify = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			//Permission to Respond
+			//Permission to Verify (VIP)
+			if(args.size() > 0)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for proper usage");
+				});
+				return;
+			}
+			extractor.fullVerification(ctx.getChannel());
+		}).build();
+		registry.register(fullVerify, "fullVerify");
+	}
+
+	private void addExecuteVerification()
+	{
+		Builder b = Command.builder();
+		Command startVerify = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			//Permission to Respond
+			//Permission to Verify (VIP)
+			if(args.size() > 0)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for proper usage");
+				});
+				return;
+			}
+			extractor.beginVerifications(ctx.getChannel());
+		}).build();
+		registry.register(startVerify, "startVerify");
 	}
 
 	/**
 	 * Return the specified Video's length of time to Discord
 	 */
-	private void addTimeCommand()
+	private void addVerifyCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
-		b.limiter(userRoleLimiter);
-		Command time = b.onCalled(ctx -> {
+		//b.limiter(channelLimiter);
+		//b.limiter(userRoleLimiter);
+		Command verify = b.onCalled(ctx -> {
+			//Permission to Respond
+			//VIP Permission
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			if (args.size() == 1)
+			boolean execute = false;
+			String filename = null;
+			//TODO Deal with repeated flags
+			try
 			{
-				File video = new File(videoDir + File.separator + args.get(0));
-				if (!video.exists())
+				while (!args.isEmpty())
 				{
-					logger.error("Video Not Found: {}", video.getAbsolutePath());
-					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage("Video Not Found");
-					});
-					dri.updateStatus();
-					return;
-				}
-				else
-				{
-					ctx.getClient().changePresence(StatusType.IDLE, ActivityType.LISTENING, args.get(0));
-					String command = ffprobeDir + " -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 -sexagesimal \""
-							+ video.getAbsolutePath() + "\"";
-					try
+					String arg = assembleString(args);
+					if (arg.startsWith("-"))
 					{
-						logger.info("Command: ({})", command);
-						Process r = Runtime.getRuntime().exec(command);
-						StreamGobbler eater = new StreamGobbler(r.getErrorStream(), true);
-						eater.start();
-						int exitValue = r.waitFor();
-						if (exitValue == 0)
+						switch (arg)
 						{
-							logger.info("Process Completed");
-							BufferedReader reader = new BufferedReader(new InputStreamReader(r.getInputStream()));
-							StringBuilder builder = new StringBuilder();
-							String line = null;
-							while ((line = reader.readLine()) != null)
-							{
-								builder.append(line);
-								builder.append(System.getProperty("line.separator"));
-							}
-							String result = new String(builder.toString().trim());
-							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage("Video Length: " + result);
-							});
-						}
-						else
-						{
-							logger.error("Process Failed, Error: {}", exitValue);
-							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage("Probing Failed, check Console for errors");
-							});
+							case "-r":
+								execute = true;
+								break;
+							default:
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Unknown Flag! Do s!help frame for proper usage");
+								});
+								return;
 						}
 					}
-					catch (IOException e1)
+					else if (filename == null)
 					{
-						logger.catching(e1);
-						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Could not start Process.");
-						});
+						filename = arg;
 					}
-					catch (InterruptedException e2)
+					else
 					{
-						logger.catching(e2);
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Interruption Exception, process not completed yet.");
+							ctx.getChannel().sendMessage("Duplicate Filename! Do s!help frame for proper usage");
 						});
-						e2.printStackTrace();
+						return;
 					}
 				}
 			}
-			else if (args.size() < 1)
+			catch (IndexOutOfBoundsException e)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help time for more information");
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
 				});
+				return;
+			}
+			if (extractor.requestSingleVerification(ctx, filename))
+			{
+				if (execute)
+					extractor.beginVerifications(ctx.getChannel());
 			}
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help time for more information");
+					ctx.getChannel().sendMessage("Skipping Verification Process");
 				});
 			}
-			dri.updateStatus();
 		}).build();
-		registry.register(time, "time");
+		registry.register(verify, "verify");
+	}
+
+	public void addWipeDeletedVideosCommand()
+	{
+
 	}
 
 	/**
@@ -302,13 +312,13 @@ public class UserActivity
 	private void addListCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
-		b.limiter(userRoleLimiter);
+		//b.limiter(channelLimiter);
+		//b.limiter(userRoleLimiter);
 		Command list = b.onCalled(ctx -> {
+			String videoDir = prop.getProperty("Video_Directory");
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			dri.updateStatus();
 			File videos = new File(videoDir);
 			if (!videos.exists())
 			{
@@ -337,7 +347,7 @@ public class UserActivity
 						s.append("```");
 						final String stringPart = s.toString();
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage(stringPart);
+							return ctx.getChannel().sendMessage(stringPart);
 						});
 						s = new StringBuilder("```\n");
 					}
@@ -352,15 +362,15 @@ public class UserActivity
 		}).build();
 		registry.register(list, "list");
 	}
-	
+
 	/**
 	 * Changes the Video Directory of bot after a quick Reboot
 	 */
 	private void addDirCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
-		b.limiter(adminRoleLimiter);
+		//b.limiter(channelLimiter);
+		//b.limiter(adminRoleLimiter);
 		Command dir = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
@@ -368,14 +378,14 @@ public class UserActivity
 			if (args.size() > 0)
 			{ // more than 1 argument
 				String path = "";
-				for(String s:args)
+				for (String s : args)
 				{
 					path += s;
 				}
 				path = path.trim();
-				if(path.startsWith("`") && path.endsWith("`"))
+				if (path.startsWith("`") && path.endsWith("`"))
 				{
-					path = path.substring(1, path.length()-2);
+					path = path.substring(1, path.length() - 2);
 				}
 				if (!new File(path).exists() || !new File(path).isDirectory())
 				{
@@ -383,10 +393,9 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage("File Path: `" + path2 + "`\nIs not valid, or does not exist.");
 					});
-					dri.updateStatus();
 					return;
 				}
-				logger.info("Updating Video Directory to: {}",path);
+				logger.info("Updating Video Directory to: {}", path);
 				dri.editVideoDirectory(path, true, ctx);
 				final String path2 = new String(path);
 				RequestBuffer.request(() -> {
@@ -406,15 +415,15 @@ public class UserActivity
 		}).build();
 		registry.register(dir, "dir");
 	}
-	
+
 	/**
 	 * Maintains command, but alerts user that command disabled
 	 */
 	private void addCantChangeCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
-		b.limiter(adminRoleLimiter);
+		//b.limiter(channelLimiter);
+		//b.limiter(adminRoleLimiter);
 		Command dir = b.onCalled(ctx -> {
 			RequestBuffer.request(() -> {
 				ctx.getChannel().sendMessage("**Command Disabled**\nEdit property in values.txt and reboot to allow usage");
@@ -429,12 +438,11 @@ public class UserActivity
 	private void addInfoCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
+		//b.limiter(channelLimiter);
 		Command info = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			dri.updateStatus();
 			String message;
 			if (args.size() > 0)
 			{ // more than 1 argument
@@ -457,10 +465,9 @@ public class UserActivity
 	private void addHelpCommand()
 	{
 		Builder b = Command.builder();
-		b.limiter(channelLimiter);
+		//b.limiter(channelLimiter);
 		Command help = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
-			dri.updateStatus();
 			if (args.size() == 1 && args.get(0).equals(""))
 			{
 				args.remove(0);
@@ -472,22 +479,31 @@ public class UserActivity
 				ArrayList<Boolean> inline = new ArrayList<Boolean>();
 				//Field Titles: 50
 				//Field Values: 175
-				textTitle.add("s!debugDB");
-				textValue.add("Freeze code in IDE to see fields");
-				inline.add(false);
 				textTitle.add("s!dir");
-				textValue.add("Change the Video Directory of Bot, Admin only, enabled only in values.txt");
+				textValue.add("Change the Video Directory to extract from, **Admin only**");
 				inline.add(false);
+				textTitle.add("<- Prerequisite");
+				textValue.add("Command will be disabled if values.txt disables it");
+				inline.add(true);
 				//ffmpeg -ss ##:##:##.### -i filename.mkv -t 1 -f image2 frame-[].jpg
-				textTitle.add("s!frame [Filename] [Timecode]");
-				textValue.add("Extract Frame from video at timecode and upload to Discord");
+				textTitle.add("s!frame [Filename] [Timecode] (Frame Number)");
+				textValue.add("Extracts Frame from video at the timecode and uploads it to Discord");
 				inline.add(false);
-				textTitle.add("s!time [Filename]");
-				textValue.add("Returns the length of the video as a time code to know how long the video is");
+				textTitle.add("<- Prerequisite");
+				textValue.add("Command will be disabled if Video Directory is invalid");
+				inline.add(true);
+				textTitle.add("s!verify [Filename] <-s>");
+				textValue.add("Manually Analyzes the video to determine the length of time, framerate.");
 				inline.add(false);
+				textTitle.add("<- Prerequisite");
+				textValue.add("Command will be disabled if Video Directory is invalid");
+				inline.add(true);
 				textTitle.add("s!list");
 				textValue.add("Lists all Videos in accessible folder that can be accessed");
 				inline.add(false);
+				textTitle.add("<- Prerequisite");
+				textValue.add("Command will be disabled if Video Directory is invalid");
+				inline.add(true);
 				textTitle.add("s!info");
 				textValue.add("Display Info about the bot");
 				inline.add(false);
@@ -498,7 +514,7 @@ public class UserActivity
 				for (int z = 0; z < pageCount; z++)
 				{
 					EmbedBuilder message = new EmbedBuilder();
-					message.withAuthorName(serverName);
+					message.withAuthorName(prop.getProperty("Server_Name"));
 					message.appendDesc("All Commands FTU-Bot respects, might require special permission set in values.txt");
 					message.withColor(255, 165, 0);
 					message.withTitle("Command List");
@@ -513,7 +529,7 @@ public class UserActivity
 					}
 					message.withFooterText("Showing " + fieldCount + " Entries - Page " + (z + 1) + "/" + pageCount);
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(message.build());
+						return ctx.getChannel().sendMessage(message.build());
 					});
 				}
 			}
@@ -522,13 +538,12 @@ public class UserActivity
 				switch (args.get(0))
 				{
 					case "debugDB":
-						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Debug command, please ignore");
-						}).get();
+						//Debug Only
 						break;
 					case "dir":
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Changes the Video Directory the bot monitors, requires Reboot.\nCommand can be completely disabled in values.txt and even then, is Admin Role only");
+							ctx.getChannel().sendMessage(
+									"Changes the Video Directory the bot monitors, requires Reboot.\nCommand can be completely disabled in values.txt and even then, is Admin Role only");
 						}).get();
 						break;
 					case "frame":
@@ -537,10 +552,10 @@ public class UserActivity
 									"Extracts frame from video and uploads to Discord\nUsage: s!frame [filename] [Timecode]\n[Filename]: Name of File, use s!list to see avaliable files\n[Timecode]: closest time to extract frame from, in this format ##:##:##.###");
 						}).get();
 						break;
-					case "time":
+					case "verify":
 						RequestBuffer.request(() -> {
 							ctx.getChannel().sendMessage(
-									"Finds the length of time a video has\nUsage: s!time [filename]\n[Filename]: Name of File, use s!list to see avaliable files");
+									"Verifies if Video can be extracted from, and if so, records the length and framerate into database\nUsage: s!verify [filename] <-r>\n[Filename]: Name of File, use s!list to see avaliable files\n<-r> include this argument to execute the verification queue\n__Warning__: pauses all extractions until completion\n__Cancellable__: fs!pause | fs!kill");
 						}).get();
 						break;
 					case "list":
@@ -582,7 +597,7 @@ public class UserActivity
 	 * The text to Verify
 	 * @return if Offset Text is Acceptable
 	 */
-	private boolean checkOffset(String text)
+	public static boolean checkOffset(String text)
 	{
 		if (!text.equals("00:00:00.000"))
 		{
@@ -593,12 +608,33 @@ public class UserActivity
 			{
 				wrong = false;
 			}
+			else if (text.length() == 8 && StringUtils.isNumeric(text.substring(0, 2)) && text.substring(2, 3).equals(":")
+					&& StringUtils.isNumeric(text.substring(3, 5)) && text.substring(5, 6).equals(":") && StringUtils.isNumeric(text.substring(6, 8)))
+			{
+				wrong = false;
+			}
 			return !wrong;
 		}
 		else
 		{
 			return true;
 		}
+	}
+
+	public String assembleString(ArrayList<String> args) throws IndexOutOfBoundsException
+	{
+		String result = args.remove(0);
+		if (result.startsWith("\""))
+		{
+			do
+			{
+				result += " " + args.remove(0);
+			}
+			while (!result.endsWith("\""));
+			return result.substring(1, result.length() - 1);
+		}
+		else
+			return result;
 	}
 
 	public CommandRegistry getRegistry()
