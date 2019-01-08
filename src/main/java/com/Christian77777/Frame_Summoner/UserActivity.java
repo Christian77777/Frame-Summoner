@@ -4,19 +4,36 @@ package com.Christian77777.Frame_Summoner;
 import java.io.File;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.Christian77777.Frame_Summoner.Database.RolePerm;
 import com.darichey.discord.Command;
+import com.darichey.discord.CommandContext;
 import com.darichey.discord.Command.Builder;
 import com.darichey.discord.CommandRegistry;
 import com.darichey.discord.limiter.UserLimiter;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.handle.impl.obj.ReactionEmoji;
+import sx.blah.discord.handle.obj.IGuild;
+import sx.blah.discord.handle.obj.IMessage;
+import sx.blah.discord.handle.obj.IRole;
+import sx.blah.discord.handle.obj.IUser;
 import sx.blah.discord.util.EmbedBuilder;
 import sx.blah.discord.util.RequestBuffer;
 
+/**
+ * 
+ * @author Christian77777
+ * Channel Tiers
+ * 0 = No Response
+ * 1 = info commands maybe
+ * 2 = extraction commands
+ * 3 =
+ * a = announcements
+ */
 public class UserActivity
 {
 
@@ -26,6 +43,7 @@ public class UserActivity
 	private Database db;
 	private Properties prop;
 	private Extractor extractor;
+	private UserLimiter operator;
 	public static DateTimeFormatter milliDateFormat = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 	public static DateTimeFormatter secondDateFormat = DateTimeFormatter.ofPattern("HH:mm:ss");
 	private CommandRegistry registry = new CommandRegistry("fs!");
@@ -38,12 +56,28 @@ public class UserActivity
 		this.c = c;
 		db = d;
 		prop = p;
+		operator = new UserLimiter(Long.valueOf(prop.getProperty("Bot_Manager")))
+		{
+
+			@Override
+			public void onFail(CommandContext ctx)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be a the Frame-Summoner Operator to use this Command");
+				});
+			}
+		};
 		extractor = new Extractor(c, d, p);
 		//Debug Commands
 		addDebugCommand();
 		//Admin Commands
 		addFullVerificationCommand();
 		addExecuteVerification();
+		addNewAdminRoleCommand();
+		addRemoveAdminRoleCommand();
+		addNewListedRoleCommand();
+		addRemoveListedRoleCommand();
+		addChangeListingModeCommand();
 		if (prop.getProperty("AllowDirectoryChange").equals("Y"))
 			addDirCommand();
 		else
@@ -74,137 +108,152 @@ public class UserActivity
 	}
 
 	/**
-	 * Extracts the specified Frame and uploads to Discord
-	 * ffmpeg -ss ##:##:##.### -i filename.mkv -t 1 -f image2 frame-[].jpg
+	 * Requests the Extractor to extract a frame
 	 */
 	private void addFrameCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
 		//b.limiter(userRoleLimiter);
 		Command frame = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			//Permission to Respond
-			//Permission to Extract
-			boolean useOffset = true;
-			String filename = null;
-			String timecode = null;
-			Integer frameCount = null;
-			//TODO Deal with repeated flags
-			try
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 2))
+				return;
+			if (checkWhitelisted(ctx.getGuild(), ctx.getAuthor()))
 			{
-				while (!args.isEmpty())
+				//Permission to Extract
+				boolean useOffset = true;
+				String filename = null;
+				String timecode = null;
+				Integer frameCount = null;
+				//TODO Deal with repeated flags
+				try
 				{
-					String arg = assembleString(args);
-					if (arg.startsWith("-"))
+					while (!args.isEmpty())
 					{
-						switch (arg)
+						String arg = assembleString(args);
+						if (arg.startsWith("-"))
 						{
-							case "-o":
-								useOffset = false;
-								break;
-							case "-f":
-								try
-								{
-									frameCount = Integer.valueOf(assembleString(args));
-									if (frameCount <= 0 || frameCount > 1000)
+							switch (arg)
+							{
+								case "-o":
+									useOffset = false;
+									break;
+								case "-f":
+									try
+									{
+										frameCount = Integer.valueOf(assembleString(args));
+										if (frameCount <= 0 || frameCount > 1000)
+										{
+											final int frameCount2 = frameCount;
+											RequestBuffer.request(() -> {
+												return ctx.getChannel().sendMessage(
+														"Invalid Frame Count value: `" + frameCount2 + "`! Valid range between 1 and 1000");
+											});
+											return;
+										}
+									}
+									catch (NumberFormatException e)
 									{
 										final int frameCount2 = frameCount;
 										RequestBuffer.request(() -> {
-											return ctx.getChannel()
-													.sendMessage("Invalid Frame Count value: `" + frameCount2 + "`! Valid range between 1 and 1000");
+											return ctx.getChannel().sendMessage("Frame Count value: " + frameCount2 + "\nnot a number!");
 										});
 										return;
 									}
-								}
-								catch (NumberFormatException e)
-								{
-									final int frameCount2 = frameCount;
+									break;
+								default:
 									RequestBuffer.request(() -> {
-										return ctx.getChannel().sendMessage("Frame Count value: " + frameCount2 + "\nnot a number!");
+										ctx.getChannel().sendMessage("Unknown Flag! Do s!help frame for proper usage");
 									});
 									return;
-								}
-								break;
-							default:
+							}
+						}
+						else if (filename == null)
+						{
+							filename = arg;
+						}
+						else if (timecode == null)
+						{
+							if (!checkOffset(arg))
+							{
+								logger.error("Offset Format Invalid: {}", timecode);
 								RequestBuffer.request(() -> {
-									ctx.getChannel().sendMessage("Unknown Flag! Do s!help frame for proper usage");
+									ctx.getChannel().sendMessage("Offset Format invalid, must be in ##:##:##.### or ##:##:##");
 								});
 								return;
+							}
+							timecode = arg;
 						}
-					}
-					else if (filename == null)
-					{
-						filename = arg;
-					}
-					else if (timecode == null)
-					{
-						if (!checkOffset(arg))
+						else
 						{
-							logger.error("Offset Format Invalid: {}", timecode);
 							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage("Offset Format invalid, must be in ##:##:##.### or ##:##:##");
+								ctx.getChannel().sendMessage("Duplicate Filename or Timecode! Do s!help frame for proper usage");
 							});
 							return;
 						}
-						timecode = arg;
-					}
-					else
-					{
-						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Duplicate Filename or Timecode! Do s!help frame for proper usage");
-						});
-						return;
 					}
 				}
-			}
-			catch (IndexOutOfBoundsException e)
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
-				});
-				return;
-			}
-			if (filename != null && timecode != null)//Required Parameters
-			{
-				extractor.requestFrame(ctx, filename, timecode, frameCount, useOffset);
+				catch (IndexOutOfBoundsException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
+					});
+					return;
+				}
+				if (filename != null && timecode != null)//Required Parameters
+				{
+					extractor.requestFrame(ctx, filename, timecode, frameCount, useOffset);
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
+					});
+				}
 			}
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help frame for proper usage");
+					ctx.getChannel().sendMessage(":no_entry_sign: You are not authorized to use this command");
 				});
 			}
 		}).build();
-		registry.register(frame, "frame");
+		registry.register(frame, "frame", "extract");
 	}
 
 	private void addRefreshVideosCommand()
 	{
-		
+
 	}
 
 	private void addFullVerificationCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
 		//b.limiter(userRoleLimiter);
 		Command fullVerify = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			//Permission to Respond
-			//Permission to Verify (VIP)
-			if(args.size() > 0)
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!db.isUserVIP(ctx.getAuthor().getLongID()))
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be a VIP to use this Command");
+				});
+				return;
+			}
+			if (args.size() > 0)
 			{
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for proper usage");
 				});
 				return;
 			}
-			extractor.fullVerification(ctx.getChannel());
+			if (confirmAction(ctx, "Would you like to temporarly Disable the Extractor and begin Verification?"))
+				extractor.fullVerification(ctx.getChannel());
 		}).build();
 		registry.register(fullVerify, "fullVerify");
 	}
@@ -216,16 +265,25 @@ public class UserActivity
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			//Permission to Respond
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!db.isUserVIP(ctx.getAuthor().getLongID()))
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be a VIP to use this Command");
+				});
+				return;
+			}
 			//Permission to Verify (VIP)
-			if(args.size() > 0)
+			if (args.size() > 0)
 			{
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help frame for proper usage");
 				});
 				return;
 			}
-			extractor.beginVerifications(ctx.getChannel());
+			if (confirmAction(ctx, "Would you like to temporarly Disable the Extractor and begin Verification?"))
+				extractor.beginVerifications(ctx.getChannel());
 		}).build();
 		registry.register(startVerify, "startVerify");
 	}
@@ -236,11 +294,17 @@ public class UserActivity
 	private void addVerifyCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
 		//b.limiter(userRoleLimiter);
 		Command verify = b.onCalled(ctx -> {
-			//Permission to Respond
-			//VIP Permission
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!db.isUserVIP(ctx.getAuthor().getLongID()))
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be a VIP to use this Command");
+				});
+				return;
+			}
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
@@ -289,7 +353,8 @@ public class UserActivity
 			if (extractor.requestSingleVerification(ctx, filename))
 			{
 				if (execute)
-					extractor.beginVerifications(ctx.getChannel());
+					if (confirmAction(ctx, "Would you like to temporarly Disable the Extractor and begin Verification?"))
+						extractor.beginVerifications(ctx.getChannel());
 			}
 			else
 			{
@@ -312,52 +377,57 @@ public class UserActivity
 	private void addListCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
-		//b.limiter(userRoleLimiter);
 		Command list = b.onCalled(ctx -> {
-			String videoDir = prop.getProperty("Video_Directory");
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			File videos = new File(videoDir);
-			if (!videos.exists())
+			//Respond at all
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 2))
 			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("No Videos found");
-				});
-				videos.mkdirs();
-			}
-			else if (videos.listFiles().length == 0)
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("No Videos found");
-				});
-			}
-			else
-			{
-				StringBuilder s = new StringBuilder("Avaliable Video Files in: *" + videoDir + "*");
-				File[] vlist = videos.listFiles();
-				s.append("\n```\n");
-				for (int x = 0; x < vlist.length; x++)
+				if (!checkWhitelisted(ctx.getGuild(), ctx.getAuthor()))
 				{
-					String nextLine = String.format("%3d", x + 1) + ". " + vlist[x].getName() + "\n";
-					if ((s.length() + nextLine.length()) >= 1996)
+					String videoDir = prop.getProperty("Video_Directory");
+					File videos = new File(videoDir);
+					if (!videos.exists() || videos.listFiles().length == 0)
 					{
-						//Send in Chunks
-						s.append("```");
-						final String stringPart = s.toString();
 						RequestBuffer.request(() -> {
-							return ctx.getChannel().sendMessage(stringPart);
+							ctx.getChannel().sendMessage("No Videos found");
 						});
-						s = new StringBuilder("```\n");
+						videos.mkdirs();
 					}
-					s.append(String.format("%3d", x + 1) + ". " + vlist[x].getName() + "\n");
+					else
+					{
+						StringBuilder s = new StringBuilder("Avaliable Video Files in: *" + videoDir + "*");
+						File[] vlist = videos.listFiles();
+						s.append("\n```\n");
+						for (int x = 0; x < vlist.length; x++)
+						{
+							String nextLine = String.format("%3d", x + 1) + ". " + vlist[x].getName() + "\n";
+							if ((s.length() + nextLine.length()) >= 1996)
+							{
+								//Send in Chunks
+								s.append("```");
+								final String stringPart = s.toString();
+								RequestBuffer.request(() -> {
+									return ctx.getChannel().sendMessage(stringPart);
+								});
+								s = new StringBuilder("```\n");
+							}
+							s.append(String.format("%3d", x + 1) + ". " + vlist[x].getName() + "\n");
+						}
+						s.append("```");
+						final String finalStringPart = s.toString();
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(finalStringPart);
+						});
+					}
 				}
-				s.append("```");
-				final String finalStringPart = s.toString();
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(finalStringPart);
-				});
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":no_entry_sign: You are not authorized to use this command");
+					});
+				}
 			}
 		}).build();
 		registry.register(list, "list");
@@ -369,12 +439,15 @@ public class UserActivity
 	private void addDirCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
-		//b.limiter(adminRoleLimiter);
+		//Restrict to Operator
+		b.limiter(operator);
 		Command dir = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
+			//Respond at all
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
 			if (args.size() > 0)
 			{ // more than 1 argument
 				String path = "";
@@ -395,14 +468,21 @@ public class UserActivity
 					});
 					return;
 				}
-				logger.info("Updating Video Directory to: {}", path);
-				dri.editVideoDirectory(path, true, ctx);
-				final String path2 = new String(path);
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("File Path: `" + path2 + "`\nSaved to values.txt");
-				});
-				logger.info("Edited values.txt, now rebooting");
-				DRI.menu.manualRestart(500);
+				if (confirmAction(ctx, "Are you sure you want to change the Directory to\n" + path))
+				{
+					logger.info("Updating Video Directory to: {}", path);
+					dri.editVideoDirectory(path, true, ctx);
+					final String path2 = new String(path);
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("File Path: `" + path2 + "`\nSaved to values.txt");
+					});
+					logger.info("Edited values.txt, now rebooting");
+					DRI.menu.manualRestart(500);
+				}
+				else
+				{
+
+				}
 			}
 			else if (args.size() == 0)
 			{
@@ -422,9 +502,19 @@ public class UserActivity
 	private void addCantChangeCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
-		//b.limiter(adminRoleLimiter);
+		//Restrict to Operator
+		b.limiter(operator);
 		Command dir = b.onCalled(ctx -> {
+			//Respond at all
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (ctx.getAuthor().getLongID() != Long.valueOf(prop.getProperty("Bot_Manager")))
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be a the Frame-Summoner Operator to use this Command");
+				});
+				return;
+			}
 			RequestBuffer.request(() -> {
 				ctx.getChannel().sendMessage("**Command Disabled**\nEdit property in values.txt and reboot to allow usage");
 			});
@@ -438,26 +528,29 @@ public class UserActivity
 	private void addInfoCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
 		Command info = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
-			String message;
-			if (args.size() > 0)
-			{ // more than 1 argument
-				message = "Too many arguments!";
+			if (db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+			{
+				if (checkWhitelisted(ctx.getGuild(), ctx.getAuthor()))
+				{
+					String message;
+					if (args.size() > 0)
+						message = "Too many arguments!";
+					else
+						message = "- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n" + "- **Programming Language:** Java\n"
+								+ "- **Discord Connection Library:** Discord4J\n" + "- **Discord (Command) Library:** Commands4J";
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(message);
+					});
+				}
+				else
+				{
+					//Tell User they are not authorized
+				}
 			}
-			else if (args.size() == 0)
-			{ // !info
-				message = "- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n" + "- **Programming Language:** Java\n"
-						+ "- **Discord Connection Library:** Discord4J\n" + "- **Discord (Command) Library:** Commands4J";
-			}
-			else
-				throw new IllegalArgumentException("Negative number of Arguments!");
-			RequestBuffer.request(() -> {
-				ctx.getChannel().sendMessage(message);
-			});
 		}).build();
 		registry.register(info, "info");
 	}
@@ -465,13 +558,12 @@ public class UserActivity
 	private void addHelpCommand()
 	{
 		Builder b = Command.builder();
-		//b.limiter(channelLimiter);
 		Command help = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
-			{
 				args.remove(0);
-			}
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
 			if (args.size() == 0)
 			{
 				ArrayList<String> textTitle = new ArrayList<String>();
@@ -588,6 +680,674 @@ public class UserActivity
 			}
 		}).build();
 		registry.register(help, "help");
+	}
+
+	private void addNewAdminRoleCommand()
+	{
+		Builder b = Command.builder();
+		//b.limiter(userRoleLimiter);
+		Command newAdmin = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!checkAdmin(ctx.getGuild(), ctx.getAuthor()))
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be an Admin to use this Command");
+				});
+			boolean isSnowflake = false;
+			String id = null;
+			//TODO Deal with repeated flags
+			try
+			{
+				while (!args.isEmpty())
+				{
+					String arg = assembleString(args);
+					if (arg.startsWith("-"))
+					{
+						switch (arg)
+						{
+							case "-n":
+								isSnowflake = true;
+								id = assembleString(args);
+								break;
+							case "-s":
+								isSnowflake = false;
+								id = assembleString(args);
+								break;
+							default:
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Unknown Flag! Do s!help addAdminRole for proper usage");
+								});
+								return;
+						}
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Undefined Argument! Do s!help addAdminRole for proper usage");
+						});
+						return;
+					}
+				}
+			}
+			catch (IndexOutOfBoundsException e)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help addAdminRole for proper usage");
+				});
+				return;
+			}
+			final String message;
+			if (id != null)
+			{
+				IRole r;
+				if (isSnowflake)
+				{
+					try
+					{
+						r = ctx.getGuild().getRoleByID(Long.parseLong(id));
+					}
+					catch (NumberFormatException e)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Not a valid Snowflake ID!");
+						});
+						return;
+					}
+				}
+				else
+				{
+					List<IRole> roles = ctx.getGuild().getRolesByName(id);
+					if (roles.size() == 1)
+						r = roles.get(0);
+					else if (roles.size() == 0)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("No role with that name!");
+						});
+						return;
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Too many roles with this Name!");
+						});
+						return;
+					}
+				}
+				try
+				{
+					if (db.addNewAdminRole(r.getLongID(), ctx.getGuild().getLongID()))
+						message = "Admin Role Added";
+					else
+						message = "Role Already Added!";
+				}
+				catch (NullPointerException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("No role with this snowflake ID!");
+					});
+					return;
+				}
+			}
+			else
+			{
+				message = "No ID Provided! Do s!help addAdminRole for proper usage";
+			}
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(message);
+			});
+		}).build();
+		registry.register(newAdmin, "newAdminRole");
+	}
+
+	private void addRemoveAdminRoleCommand()
+	{
+		Builder b = Command.builder();
+		//b.limiter(userRoleLimiter);
+		Command removeAdmin = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!checkAdmin(ctx.getGuild(), ctx.getAuthor()))
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be an Admin to use this Command");
+				});
+			boolean isSnowflake = false;
+			String id = null;
+			//TODO Deal with repeated flags
+			try
+			{
+				while (!args.isEmpty())
+				{
+					String arg = assembleString(args);
+					if (arg.startsWith("-"))
+					{
+						switch (arg)
+						{
+							case "-n":
+								isSnowflake = true;
+								id = assembleString(args);
+								break;
+							case "-s":
+								isSnowflake = false;
+								id = assembleString(args);
+								break;
+							default:
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Unknown Flag! Do s!help removeAdminRole for proper usage");
+								});
+								return;
+						}
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Undefined Argument! Do s!help removeAdminRole for proper usage");
+						});
+						return;
+					}
+				}
+			}
+			catch (IndexOutOfBoundsException e)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help removeAdminRole for proper usage");
+				});
+				return;
+			}
+			final String message;
+			if (id != null)
+			{
+				IRole r;
+				if (isSnowflake)
+				{
+					try//Shouldn't care if the role exists, because outdated roles will be removed on reboot
+					{
+						r = ctx.getGuild().getRoleByID(Long.parseLong(id));
+					}
+					catch (NumberFormatException e)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Not a valid Snowflake ID!");
+						});
+						return;
+					}
+				}
+				else
+				{
+					List<IRole> roles = ctx.getGuild().getRolesByName(id);
+					if (roles.size() == 1)
+						r = roles.get(0);
+					else if (roles.size() == 0)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("No role with that name!");
+						});
+						return;
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Too many roles with this Name!");
+						});
+						return;
+					}
+				}
+				try
+				{
+					if (db.removeAdminRole(r.getLongID()))
+						message = "Admin Role Removed";
+					else
+						message = "Role not an Admin";
+				}
+				catch (NullPointerException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("No role with this snowflake ID!");
+					});
+					return;
+				}
+			}
+			else
+			{
+				message = "No ID Provided! Do s!help removeAdminRole for proper usage";
+			}
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(message);
+			});
+		}).build();
+		registry.register(removeAdmin, "removeAdminRole");
+	}
+	
+	private void addNewListedRoleCommand()
+	{
+		Builder b = Command.builder();
+		//b.limiter(userRoleLimiter);
+		Command newRole = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!checkAdmin(ctx.getGuild(), ctx.getAuthor()))
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be an Admin to use this Command");
+				});
+			boolean isSnowflake = false;
+			String id = null;
+			//TODO Deal with repeated flags
+			try
+			{
+				while (!args.isEmpty())
+				{
+					String arg = assembleString(args);
+					if (arg.startsWith("-"))
+					{
+						switch (arg)
+						{
+							case "-n":
+								isSnowflake = true;
+								id = assembleString(args);
+								break;
+							case "-s":
+								isSnowflake = false;
+								id = assembleString(args);
+								break;
+							default:
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Unknown Flag! Do s!help addListedRole for proper usage");
+								});
+								return;
+						}
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Undefined Argument! Do s!help addListedRole for proper usage");
+						});
+						return;
+					}
+				}
+			}
+			catch (IndexOutOfBoundsException e)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help addListedRole for proper usage");
+				});
+				return;
+			}
+			final String message;
+			if (id != null)
+			{
+				IRole r;
+				if (isSnowflake)
+				{
+					try
+					{
+						r = ctx.getGuild().getRoleByID(Long.parseLong(id));
+					}
+					catch (NumberFormatException e)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Not a valid Snowflake ID!");
+						});
+						return;
+					}
+				}
+				else
+				{
+					List<IRole> roles = ctx.getGuild().getRolesByName(id);
+					if (roles.size() == 1)
+						r = roles.get(0);
+					else if (roles.size() == 0)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("No role with that name!");
+						});
+						return;
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Too many roles with this Name!");
+						});
+						return;
+					}
+				}
+				boolean isBlacklist = db.checkGuildBlacklistMode(ctx.getGuild().getLongID());
+				try
+				{
+					if (db.addNewUserRole(r.getLongID(), ctx.getGuild().getLongID(), isBlacklist))
+					{	
+						if(isBlacklist)
+							message = "Blacklist Role Added";
+						else
+							message = "Whitelist Role Added";
+					}
+					else
+						message = "Role Already Added!";
+				}
+				catch (NullPointerException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("No role with this snowflake ID!");
+					});
+					return;
+				}
+			}
+			else
+			{
+				message = "No ID Provided! Do s!help addListedRole for proper usage";
+			}
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(message);
+			});
+		}).build();
+		registry.register(newRole, "addListedRole");
+	}
+	
+	private void addRemoveListedRoleCommand()
+	{
+		Builder b = Command.builder();
+		//b.limiter(userRoleLimiter);
+		Command removeRole = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!checkAdmin(ctx.getGuild(), ctx.getAuthor()))
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be an Admin to use this Command");
+				});
+			boolean isSnowflake = false;
+			String id = null;
+			//TODO Deal with repeated flags
+			try
+			{
+				while (!args.isEmpty())
+				{
+					String arg = assembleString(args);
+					if (arg.startsWith("-"))
+					{
+						switch (arg)
+						{
+							case "-n":
+								isSnowflake = true;
+								id = assembleString(args);
+								break;
+							case "-s":
+								isSnowflake = false;
+								id = assembleString(args);
+								break;
+							default:
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Unknown Flag! Do s!help removeListedRole for proper usage");
+								});
+								return;
+						}
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Undefined Argument! Do s!help removeListedRole for proper usage");
+						});
+						return;
+					}
+				}
+			}
+			catch (IndexOutOfBoundsException e)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Not Enough Arguments! Do s!help removeListedRole for proper usage");
+				});
+				return;
+			}
+			final String message;
+			if (id != null)
+			{
+				IRole r;
+				if (isSnowflake)
+				{
+					try
+					{
+						r = ctx.getGuild().getRoleByID(Long.parseLong(id));
+					}
+					catch (NumberFormatException e)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Not a valid Snowflake ID!");
+						});
+						return;
+					}
+				}
+				else
+				{
+					List<IRole> roles = ctx.getGuild().getRolesByName(id);
+					if (roles.size() == 1)
+						r = roles.get(0);
+					else if (roles.size() == 0)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("No role with that name!");
+						});
+						return;
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Too many roles with this Name!");
+						});
+						return;
+					}
+				}
+				try
+				{
+					if (db.removeUserRole(r.getLongID()))
+						message = "Listed Role Removed";
+					else
+						message = "Role not Listed!";
+				}
+				catch (NullPointerException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("No role with this snowflake ID!");
+					});
+					return;
+				}
+			}
+			else
+			{
+				message = "No ID Provided! Do s!help removeListedRole for proper usage";
+			}
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(message);
+			});
+		}).build();
+		registry.register(removeRole, "removeListedRole");
+	}
+	
+	private void addChangeListingModeCommand()
+	{
+		Builder b = Command.builder();
+		Command changeListing = b.onCalled(ctx -> {
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (!db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				return;
+			if (!checkAdmin(ctx.getGuild(), ctx.getAuthor()))
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":no_entry_sign: You must be an Admin to use this Command");
+				});
+				return;
+			}
+			if (args.size() > 0)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Too Many Arguments! Do s!help changeListingMode for proper usage");
+				});
+				return;
+			}
+			boolean isBlacklist = db.checkGuildBlacklistMode(ctx.getGuild().getLongID());
+			String message;
+			if(isBlacklist)
+				message = "Would you like to change this server from a Blacklist to Whitelist?\nAll Current Listing Permissions will be deleted.";
+			else
+				message = "Would you like to change this server from a Whitelist to Blacklist?\nAll Current Listing Permissions will be deleted.";
+			if (confirmAction(ctx, message))
+			{
+				db.changeGuildBlacklistMode(ctx.getGuild().getLongID(),!isBlacklist);
+				String alternateList;
+				if(isBlacklist)
+					alternateList = "Whitelist";
+				else
+					alternateList = "Blacklist";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("This Guild has switched to a " + alternateList);
+				});
+			}
+		}).build();
+		registry.register(changeListing, "changeListingMode");
+	}
+	
+	private boolean confirmAction(CommandContext ctx, String message)
+	{
+		IMessage m = RequestBuffer.request(() -> {
+			return ctx.getMessage().reply(message.substring(0, Math.min(message.length(), 1900))
+					+ "\n:white_check_mark: to Confirm\n:negative_squared_cross_mark: to Deny\n5 seconds to Accept");
+		}).get();
+		RequestBuffer.request(() -> {
+			m.addReaction(confirm);
+		}).get();
+		RequestBuffer.request(() -> {
+			m.addReaction(deny);
+		}).get();
+		try
+		{
+			Thread.sleep(5000);
+		}
+		catch (InterruptedException e)
+		{
+			e.printStackTrace();
+		}
+		IMessage m3 = ctx.getClient().getMessageByID(m.getLongID());
+		if (m3.getReactionByEmoji(deny).getUserReacted(ctx.getMessage().getAuthor()))
+		{
+			RequestBuffer.request(() -> {
+				m3.removeReaction(m3.getClient().getOurUser(), confirm);
+			}).get();
+			RequestBuffer.request(() -> {
+				m3.addReaction(ReactionEmoji.of(new String(Character.toChars(127383))));
+			}).get();
+			return false;
+		}
+		else if (m3.getReactionByEmoji(confirm).getUserReacted(ctx.getMessage().getAuthor()))
+		{
+			RequestBuffer.request(() -> {
+				m3.removeReaction(m3.getClient().getOurUser(), deny);
+			}).get();
+			RequestBuffer.request(() -> {
+				m3.addReaction(ReactionEmoji.of(new String(Character.toChars(127383))));
+			}).get();
+			return true;
+		}
+		else
+		{
+			RequestBuffer.request(() -> {
+				m3.removeAllReactions();
+			}).get();
+			RequestBuffer.request(() -> {
+				m3.addReaction(ReactionEmoji.of(new String(Character.toChars(128162))));
+			}).get();
+			return false;
+		}
+	}
+
+	/**
+	 * Check if the User is allowed to use the bot in the server
+	 * REQUIRED ASSUMPTION: Server must have a single mode, Blacklist or Whitelist. All entries for a single guild assumed
+	 * to be of one type
+	 * @param guild Guild where the rules are relevant
+	 * @param user who needs to be checked
+	 * @return if user has the proper roles required
+	 */
+	public boolean checkWhitelisted(IGuild guild, IUser user)
+	{
+		ArrayList<Long> roles = new ArrayList<Long>();
+		//Insertion Sort, for sorting the user roles in ascending order. Using Insertion Sort because iteration is already required to extract the actual Longs
+		for (IRole r : user.getRolesForGuild(guild))
+		{
+			if (roles.isEmpty())
+				roles.add(r.getLongID());
+			else
+				for (int x = 0; x < roles.size(); x++)
+				{
+					if (roles.get(x) >= r.getLongID())
+					{
+						roles.add(x, r.getLongID());
+						break;
+					}
+				}
+		}
+		//Get already sorted list of relevant roles for Guild
+		ArrayList<RolePerm> rolePerms = db.getReleventRoles(guild.getLongID());
+		if (!rolePerms.isEmpty())
+		{
+			boolean isBlacklist = rolePerms.get(0).getBlackVSWhite();//Hints Guild Listing Mode
+			int lIndex = 0;
+			int rIndex = 0;
+			//Iterate through both sorted arrays for any match
+			while (roles.size() > lIndex && rolePerms.size() > rIndex)
+			{
+				int comparision = roles.get(lIndex).compareTo(rolePerms.get(rIndex).getRoleID());
+				if (comparision == 0)//Match found
+				{
+					if (isBlacklist)//Blacklist matched
+						return false;
+					else//Whitelist matched
+						return true;
+				}
+				else if (comparision > 0)
+					rIndex++;
+				else
+					lIndex++;
+			}
+			//No Match found, use Hint as database mode
+			if (isBlacklist)//blacklist
+				return true;
+			else
+				return false;
+		}
+		//No comparison found, must check if white or blacklist (BUG Admin about requiring two Database calls)
+		if (db.checkGuildBlacklistMode(guild.getLongID()))
+			return true;
+		else
+			return false;
+	}
+
+	/**
+	 * Check if User has the required admin role
+	 * @param guild Guild the message was required
+	 * @param user User that sent the message
+	 * @return if user had the required roles
+	 */
+	public boolean checkAdmin(IGuild guild, IUser user)
+	{
+		ArrayList<IRole> roles = new ArrayList<IRole>(user.getRolesForGuild(guild));
+		ArrayList<Long> required = db.getListOfAdminRoles(guild.getLongID());
+		for (IRole r : roles)
+		{
+			if (required.contains(r.getLongID()))
+				return true;
+		}
+		return false;
 	}
 
 	/**

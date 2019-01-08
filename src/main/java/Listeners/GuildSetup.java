@@ -83,7 +83,7 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 		else//New Server
 		{
 			//Initialize Server
-			db.addNewGuild(id);
+			db.addNewDefaultGuild(id);
 			logger.info("Added new Guild: " + event.getGuild().getName());
 			//Initialize Channels
 			ArrayList<IChannel> channels = new ArrayList<IChannel>(event.getGuild().getChannels());

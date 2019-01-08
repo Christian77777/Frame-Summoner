@@ -53,7 +53,7 @@ public class Database
 
 	private PreparedStatement psCheckIfGuildExists, psAddNewGuild, psRemoveGuild, psAddNewChannel, psListOfConfiguredChannels, psRemoveChannel, psAddNewAdminRole,
 			psListOfAdminRoles, psRemoveAdminRole, psAddNewUserRole, psListOfUserRoles, psRemoveUserRole, psRemoveVideo, psAddOrUpdateVideo,
-			psGetVideoByFilename, psCheckIFVIP, psWipeAllVideos, psCountVideos;
+			psGetVideoByFilename, psCheckIFVIP, psWipeAllVideos, psCountVideos, psCheckChannelTier, psGetRolePerms, psCheckGuildBlacklistMode, psChangeGuildBlacklistMode, psRemoveAllUserRoles;
 
 	public static void main(String[] args) throws SQLException
 	{
@@ -166,7 +166,7 @@ public class Database
 	 * @param id The GuildID
 	 * @return if the SQL executed successfully
 	 */
-	public boolean addNewGuild(long id)
+	public boolean addNewDefaultGuild(long id)
 	{
 		boolean result = false;
 		lock.lock();
@@ -191,7 +191,7 @@ public class Database
 	 */
 	public boolean checkIfGuildExists(long id)
 	{
-		boolean result = true;
+		boolean result = false;
 		lock.lock();
 		try
 		{
@@ -206,6 +206,34 @@ public class Database
 				logger.error("Guild Existence Query Statement somehow failed to return a value");
 			}
 			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+	
+	/**
+	 * Change Guild Blacklist Mode
+	 * @param id Guild to change mode
+	 * @param isBlacklist the Listing mode to change to
+	 * @return if the Guild was Found
+	 */
+	public boolean changeGuildBlacklistMode(long id, boolean isBlacklist)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psRemoveAllUserRoles.setLong(1, id);
+			psRemoveAllUserRoles.executeUpdate();
+			psChangeGuildBlacklistMode.setBoolean(1, isBlacklist);
+			psChangeGuildBlacklistMode.setLong(2, id);
+			psChangeGuildBlacklistMode.executeUpdate();
+			if(psChangeGuildBlacklistMode.getUpdateCount() > 0)
+				result = true;
 		}
 		catch (SQLException e)
 		{
@@ -322,7 +350,7 @@ public class Database
 	 * Recognizes a new Role as Admin
 	 * @param id The Role ID
 	 * @param guild The Guild ID, must be already in Guilds Table
-	 * @return if the SQL executed successfully
+	 * @return if the Role is actually new
 	 */
 	public boolean addNewAdminRole(long id, long guild)
 	{
@@ -383,7 +411,8 @@ public class Database
 		{
 			psRemoveAdminRole.setLong(1, id);
 			psRemoveAdminRole.executeUpdate();
-			result = true;
+			if(psRemoveAdminRole.getUpdateCount() > 0)
+				result = true;
 		}
 		catch (SQLException e)
 		{
@@ -397,10 +426,10 @@ public class Database
 	 * Recognizes a new User Role as White/Black Listed
 	 * @param id The Role ID
 	 * @param guild The Guild ID, must be already in Guilds Table
-	 * @param blacklistvarient If entry is supposed to be treated as blacklist entry, otherwise whitelist entry
+	 * @param blackVSWhite If entry is supposed to be treated as blacklist entry, otherwise whitelist entry
 	 * @return if the SQL executed successfully
 	 */
-	public boolean addNewUserRole(long id, long guild, boolean blacklistvarient)
+	public boolean addNewUserRole(long id, long guild, boolean blackVSWhite)
 	{
 		boolean result = false;
 		lock.lock();
@@ -408,7 +437,7 @@ public class Database
 		{
 			psAddNewUserRole.setLong(1, id);
 			psAddNewUserRole.setLong(2, guild);
-			psAddNewUserRole.setBoolean(3, blacklistvarient);
+			psAddNewUserRole.setBoolean(3, blackVSWhite);
 			psAddNewUserRole.executeUpdate();
 			result = true;
 		}
@@ -653,6 +682,98 @@ public class Database
 		lock.unlock();
 		return result;
 	}
+	
+	/**
+	 * Check if command is available in channel
+	 * @param channel id of channel to check
+	 * @param tier permission tier required
+	 * @return If the permission was accepted
+	 */
+	public boolean checkChannelPermission(long channel, int tier)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psCheckChannelTier.setLong(1, channel);
+			ResultSet rs = psCheckChannelTier.executeQuery();
+			if (rs.next())
+			{
+				int perm = rs.getInt(1);
+				if(perm >= tier)
+					result = true;
+			}
+			else
+			{
+				logger.warn("Channel `{}` does not Exist!", channel);
+			}
+			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+	
+	/**
+	 * Count the number of visible videos in the Database
+	 * @param filename Name of File
+	 * @return Object array with the first 3 slots being String, and the last slot being a boolean
+	 */
+	public ArrayList<RolePerm> getReleventRoles(long id)
+	{
+		ArrayList<RolePerm> result = new ArrayList<RolePerm>();
+		lock.lock();
+		try
+		{
+			psGetRolePerms.setLong(1, id);
+			ResultSet rs = psGetRolePerms.executeQuery();
+			while (rs.next())//Exists at all
+			{
+				result.add(new RolePerm(rs.getLong(1), rs.getBoolean(2)));
+			}
+			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+	
+	/**
+	 * Check what Listing Mode the Guild has specified
+	 * @param guildID id of Guild to check
+	 * @return If the guild is running in Blacklist Mode
+	 */
+	public boolean checkGuildBlacklistMode(long guildID)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psCheckGuildBlacklistMode.setLong(1, guildID);
+			ResultSet rs = psCheckGuildBlacklistMode.executeQuery();
+			if (rs.next())
+			{
+				result = rs.getBoolean(1);
+			}
+			else
+			{
+				logger.warn("GuildID `{}` does not Exist!", guildID);
+			}
+			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
 
 	private void generateTablesAndTriggers(Statement stmt) throws SQLException
 	{
@@ -664,13 +785,13 @@ public class Database
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `ExtractionRecord` ( `Date` TEXT NOT NULL UNIQUE, `UserID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `Frame Count` INTEGER, `Processed` INTEGER NOT NULL, FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE NO ACTION, PRIMARY KEY(`Date`), FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE NO ACTION, FOREIGN KEY(`UserID`) REFERENCES `UserRecord`(`UserID`) ON UPDATE CASCADE ON DELETE NO ACTION )");
 		stmt.executeUpdate(
-				"CREATE TABLE IF NOT EXISTS `Guilds` ( `GuildID` INTEGER NOT NULL UNIQUE, `RequestLimit` INTEGER NOT NULL DEFAULT 1000, `UsedToday` INTEGER NOT NULL DEFAULT 0, `Enabled` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`GuildID`) )");
+				"CREATE TABLE IF NOT EXISTS `Guilds` ( `GuildID` INTEGER NOT NULL UNIQUE, `RequestLimit` INTEGER NOT NULL DEFAULT 1000, `UsedToday` INTEGER NOT NULL DEFAULT 0, `Enabled` INTEGER NOT NULL DEFAULT 1, `isBlacklist` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`GuildID`) )");
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `Links` ( `Title` TEXT NOT NULL UNIQUE, `Link` TEXT NOT NULL, `Usable` INTEGER NOT NULL, `Filename` TEXT, PRIMARY KEY(`Title`), FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE SET NULL )");
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `Moments` ( `GuildID` INTEGER NOT NULL, `Name` TEXT NOT NULL, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `TimesUsed` INTEGER NOT NULL DEFAULT 1, `Disabled` INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE, FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE RESTRICT )");
 		stmt.executeUpdate(
-				"CREATE TABLE IF NOT EXISTS `RolePerms` ( `RoleID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `BlackList` INTEGER NOT NULL, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE )");
+				"CREATE TABLE IF NOT EXISTS `RolePerms` ( `RoleID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `BlackVSWhite` INTEGER NOT NULL, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE )");
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `ServerUserBans` ( `UserID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, PRIMARY KEY(`UserID`,`GuildID`), FOREIGN KEY(`UserID`) REFERENCES `UserRecord`(`UserID`) ON UPDATE CASCADE ON DELETE CASCADE, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE NO ACTION )");
 		stmt.executeUpdate(
@@ -687,7 +808,7 @@ public class Database
 	private void generateStatements() throws SQLException
 	{
 		psCheckIfGuildExists = c.prepareStatement("SELECT EXISTS(SELECT 1 FROM `Guilds` WHERE `GuildID` = ? LIMIT 1);");
-		psAddNewGuild = c.prepareStatement("INSERT INTO `Guilds` VALUES(?,1000,0,1);");
+		psAddNewGuild = c.prepareStatement("INSERT INTO `Guilds` VALUES(?,1000,0,1,1);");
 		psRemoveGuild = c.prepareStatement("DELETE FROM `Guilds` WHERE `GuildID` = ?;");
 		psAddNewChannel = c.prepareStatement("INSERT INTO `ChannelPerms` VALUES(?,?,?,?);");
 		psListOfConfiguredChannels = c.prepareStatement("SELECT `ChannelID` FROM `ChannelPerms` WHERE `GuildID` = ?;");
@@ -705,6 +826,33 @@ public class Database
 		psCheckIFVIP = c.prepareStatement("SELECT EXISTS(SELECT 1 FROM `UserRecord` WHERE `UserID` = ? AND `VIP` = 1 LIMIT 1);");
 		psWipeAllVideos = c.prepareStatement("DELETE FROM `Videos`;");
 		psCountVideos = c.prepareStatement("SELECT COUNT(rowid) FROM `Videos` WHERE `Usable` = 1;");
+		psCheckChannelTier = c.prepareStatement("SELECT `Permission` FROM `ChannelPerms` WHERE `ChannelID` = ? LIMIT 1;");
+		psGetRolePerms = c.prepareStatement("SELECT `RoleID`, `BlackVSWhite` FROM `RolePerms` ORDER BY `RoleID` ASC WHERE `GuildID`= ?;");
+		psCheckGuildBlacklistMode = c.prepareStatement("SELECT `isBlacklist` FROM `Guilds` WHERE `GuildID` = ?;");
+		psChangeGuildBlacklistMode = c.prepareStatement("UPDATE `Guilds` SET `isBlacklist` = ? WHERE `GuildID` = ?;");
+		psRemoveAllUserRoles = c.prepareStatement("DELETE FROM `RolePerms` WHERE `GuildID` = ?;");
+	}
+	
+	public class RolePerm
+	{
+		private long roleID;
+		private boolean blackVSwhite;
+		
+		private RolePerm(long roleID, boolean blackVSwhite)
+		{
+			this.roleID = roleID;
+			this.blackVSwhite = blackVSwhite;
+		}
+		
+		public long getRoleID()
+		{
+			return roleID;
+		}
+		
+		public boolean getBlackVSWhite()
+		{
+			return blackVSwhite;
+		}
 	}
 	
 	public class Video
