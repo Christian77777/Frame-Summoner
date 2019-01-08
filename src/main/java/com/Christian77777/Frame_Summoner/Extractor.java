@@ -185,7 +185,7 @@ public class Extractor
 					extractionThread.join();
 					RequestBuffer.request(() -> {
 						channel.sendMessage("Beginning Verification for " + verifications.size() + " Videos");
-					});
+					}).get();
 					client.changePresence(StatusType.DND, ActivityType.LISTENING, "to " + verifications.size() + " Videos");
 					int initial = verifications.size();
 					int count = 0;
