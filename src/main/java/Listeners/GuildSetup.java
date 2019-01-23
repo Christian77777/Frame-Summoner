@@ -2,6 +2,7 @@
 package Listeners;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Properties;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -10,6 +11,7 @@ import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.guild.GuildCreateEvent;
 import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IRole;
+import sx.blah.discord.handle.obj.IUser;
 import sx.blah.discord.handle.obj.Permissions;
 
 public class GuildSetup implements IListener<GuildCreateEvent>
@@ -17,11 +19,13 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 	private static Logger logger = LogManager.getLogger();
 	private Database db;
 	private Properties prop;
+	private String prefix;
 
-	public GuildSetup(Database db, Properties prop)
+	public GuildSetup(Database db, Properties prop, String prefix)
 	{
 		this.db = db;
 		this.prop = prop;
+		this.prefix = prefix;
 	}
 
 	@Override
@@ -111,29 +115,38 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 					}
 				}
 				rolecall = rolecall.substring(0, rolecall.length() - 2);
-				declaration = "Sup " + rolecall
-						+ "\nI am __Frame-Summoner__, a Discord bot that provides access to frames of video content.\nCurrently, I focus on video content for \""
+				declaration = "Hello " + rolecall
+						+ "\nI am __Frame-Summoner__, a Discord bot that provides access to frames of video content.\nCurrently I acknowledge the `" + prefix + "` command prefix and have a syntax like `fs!command <arguments>`\nI focus on video content for \""
 						+ prop.getProperty("Content_Name") + "\" and am running on \"" + prop.getProperty("Server_Name")
-						+ "\".\nOn First Join, I am to ignore all commands from users, and only respond to Server Managers, AKA the peeps I pinged.\nSo, for pete's sake, make sure to do `fs!help init` for instructions on unlocking functionality for the plebs";
+						+ "\".\nOn First Join, I am to ignore all commands from users, and all commands in any channel. \nThe first step is for the Server Admins, AKA the users I pinged to do `fs!guide init` in PMs for instructions on unlocking functionality.";
 				firstChannel.sendMessage(declaration);
 			}
 			else
 			{
+				HashSet<Long> admins = new HashSet<Long>();
+				admins.add(event.getGuild().getOwner().getLongID());
 				for (IRole r : event.getGuild().getRoles())
 				{
 					if (r.getPermissions().contains(Permissions.MANAGE_SERVER))
 					{
 						db.addNewAdminRole(r.getLongID(), id);
+						for(IUser u : event.getGuild().getUsersByRole(r))
+						{
+							admins.add(u.getLongID());
+						}
 						rolecall += r.getName() + ", ";
 					}
 				}
 				rolecall = rolecall.substring(0, rolecall.length() - 2);
-				declaration = "Sup " + rolecall
-						+ "\nI am __Frame-Summoner__, a Discord bot that provide access to frames of video content.\nCurrently, I focus on video content for \""
+				declaration = "Hello " + rolecall
+						+ "\nI am __Frame-Summoner__, a Discord bot that provide access to frames of video content.\nCurrently I acknowledge the `" + prefix + "` command prefix and have a syntax like `fs!command <arguments>`\nI focus on video content for \""
 						+ prop.getProperty("Content_Name") + "\" and am running on \"" + prop.getProperty("Server_Name")
-						+ "\".\nOn First Join, I am to ignore all commands from users, and only respond to Server Managers, AKA the peeps I pinged.\nSo, for pete's sake, make sure to do `fs!help init` for instructions on unlocking functionality for the plebs";
-				event.getGuild().getOwner().getOrCreatePMChannel().sendMessage(declaration + "\n**NOTE**: I could not send ANY messages in the "
-						+ event.getGuild().getName() + " Server, make sure that every channel that I can read, I can also respond in.");
+						+ "\".\nOn First Join, I am to ignore all commands from users, and all commands in any channel. \nThe first step is for the Server Admins, AKA the users I pinged to do `fs!guide init` for instructions on unlocking functionality.";
+				for(Long l : admins)
+				{
+					event.getClient().getUserByID(l).getOrCreatePMChannel().sendMessage(declaration + "\n**NOTE**: I could not send ANY messages in the "
+							+ event.getGuild().getName() + " Server, make sure to give me permission to read and send messages + embeds in at least 1 channel before crying about bugs.");
+				}
 			}
 		}
 	}

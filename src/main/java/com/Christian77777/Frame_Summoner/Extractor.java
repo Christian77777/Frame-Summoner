@@ -6,18 +6,27 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.LinkedList;
 import java.util.Properties;
 import java.util.Queue;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.Christian77777.Frame_Summoner.Database.NormalUser;
 import com.Christian77777.Frame_Summoner.Database.Video;
 import com.darichey.discord.CommandContext;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.handle.obj.ActivityType;
 import sx.blah.discord.handle.obj.IChannel;
+import sx.blah.discord.handle.obj.IMessage;
 import sx.blah.discord.handle.obj.IUser;
 import sx.blah.discord.handle.obj.StatusType;
 import sx.blah.discord.util.RequestBuffer;
@@ -37,6 +46,7 @@ public class Extractor
 	private IDiscordClient client;
 	private final LinkedBlockingQueue<ExtractionJob> queue;
 	private final Queue<TimestampJob> verifications;
+	private ScheduledExecutorService midnightReset = Executors.newScheduledThreadPool(1);
 
 	//Offsets are positive if the first frame of the Youtube video starts later in the life of the source video
 	public Extractor(IDiscordClient c, Database d, Properties p)
@@ -46,6 +56,13 @@ public class Extractor
 		prop = p;
 		verifications = new LinkedList<TimestampJob>();
 		queue = new LinkedBlockingQueue<ExtractionJob>(QUEUE_LIMIT);
+		long seconds = localSecondsUntilMidnight();
+		midnightReset.scheduleWithFixedDelay(() -> {
+			Thread.currentThread().setName("MidnightReset");
+			db.resetDailyUsage(0, null);
+			logger.info("Daily Usage Reset");
+		}, seconds, 24 * 60 * 60, TimeUnit.SECONDS);
+		logger.info("Next Reset takes place in {}", convertMilliToTime(seconds * 1000));
 		startExtractor();
 	}
 
@@ -202,7 +219,7 @@ public class Extractor
 						if (forcefulShutdown)
 							response = ":no_entry: Terminating verification, Frame Extraction was manually disabled";
 						else
-							response = ":radioactive: Video verification completed only for " + count + "/" + initial + " files";
+							response = ":warning: Video verification completed only for " + count + "/" + initial + " files";
 						while (queue.peek() != null)
 							queue.remove();
 					}
@@ -212,7 +229,7 @@ public class Extractor
 						if (count == initial)
 							response = ":white_check_mark: Video verification completed for " + count + " files";
 						else
-							response = ":radioactive: Video verification completed only for " + count + "/" + initial + " files";
+							response = ":warning: Video verification completed only for " + count + "/" + initial + " files";
 					}
 					RequestBuffer.request(() -> {
 						channel.sendMessage(response);
@@ -246,7 +263,7 @@ public class Extractor
 			{
 				logger.error("Video_Directory property is not a valid Directory: {}", prop.getProperty("Video_Directory"));
 				RequestBuffer.request(() -> {
-					c.sendMessage("Video Directory is not a Directory!");
+					c.sendMessage(":warning: Video Directory is not a Directory!");
 				});
 				return false;
 			}
@@ -260,7 +277,7 @@ public class Extractor
 		else
 		{
 			RequestBuffer.request(() -> {
-				c.sendMessage("Frame-Summoner is disabled, please disable it first!");
+				c.sendMessage("Frame-Summoner is disabled, please ensable it first!");
 			});
 			return false;
 		}
@@ -281,30 +298,61 @@ public class Extractor
 		if (running)
 		{
 			File video = new File(prop.getProperty("Video_Directory") + File.separator + filename);
+			NormalUser person = db.getUserUsage(ctx.getAuthor().getLongID());
+			int maxUserExtracts = Integer.valueOf(prop.getProperty("MaxUserExtracts"));
+			//Permission Denied if Globally banned.
+			if (person != null)
+			{
+				//Permission Denied if Globally banned.
+				if (person.isBanned())
+				{
+					RequestBuffer.request(() -> {
+						ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry_sign: You are banned interacting with Frame-Summoner");
+					});
+					return false;
+				}
+				//Permission Denied if not VIP and over the maximum number of extractions
+				if (person.getUsedToday() >= maxUserExtracts && !(person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager"))))
+				{
+					RequestBuffer.request(() -> {
+						ctx.getAuthor().getOrCreatePMChannel().sendMessage(":clock3: You have reached the max of `" + maxUserExtracts
+								+ "` Frames per day. Reset in `" + convertMilliToTime(localSecondsUntilMidnight() * 1000) + "`");
+					});
+					return false;
+				}
+			}
 			Video data = db.getVideoData(filename);
-			boolean accessible = false;
-			if (data != null)//Check if Video Exists
-				accessible = (data.isUsable() || db.isUserVIP(ctx.getAuthor().getLongID()));//Check if exists only for VIP
-			if (!accessible)
+			//Extraction cancelled if video is not even recorded at all
+			if (data == null || !data.isUsable())
 			{
 				logger.warn("Video Not Found: {}", video.getAbsolutePath());
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Video Not Found");
+					ctx.getChannel().sendMessage(":warning: Video Not Found");
+				});
+				return false;
+			}
+			//Permission denied if Video is not visible with the users current permission level
+			if (data.isRestricted() && !person.isVip())
+			{
+				logger.warn("Video Not Accessible: {}", video.getAbsolutePath());
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":warning: Video Not Found");
 				});
 				return false;
 			}
 			long timestamp = convertTimeToMilli(timecode, frameCount, data.getFps());
 			if (useOffset && data.getOffset() != 0)//If Offset, and requested, add offset to timecode
 				timestamp += data.getOffset();
-			if (data.getLength() < timestamp)//Compare timecode to length
+			//Compare timecode to length
+			if (data.getLength() < timestamp)
 			{
 				logger.error("Timestamp extends past video Length: {}", timecode);
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Timestamp extends past video Length: " + convertMilliToTIme(data.getLength()));
+					ctx.getChannel().sendMessage(":warning: Timestamp extends past video Length: " + convertMilliToTime(data.getLength()));
 				});
 				return false;
 			}
-			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), filename, timecode, frameCount)))//Add to Queue if not too full
+			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), filename, timecode, frameCount, person)))//Add to Queue if not too full
 			{
 				RequestBuffer.request(() -> {
 					ctx.getMessage().addReaction(UserActivity.confirm);
@@ -342,8 +390,8 @@ public class Extractor
 		}
 		job.channel.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, job.filename);
 		RequestBuffer.request(() -> {
-			return job.channel.sendMessage("Summoning Frame...");
-		});
+			job.channel.sendMessage("Summoning Frame...");
+		}).get();
 		String framecut = "";
 		if (job.frameCount != null)
 		{
@@ -388,35 +436,39 @@ public class Extractor
 			{
 				logger.info("Process Completed");
 				File frame = new File(DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.filename + ".png");
-				RequestFuture<FileNotFoundException> e1 = RequestBuffer.request(() -> {
+				IMessage message = RequestBuffer.request(() -> {
 					try
 					{
-						job.channel.sendFile(job.author.mention() + " Frame from video " + job.filename + " at " + job.timecode, frame);
+						return job.channel.sendFile(job.author.mention() + " Frame from video " + job.filename + " at " + job.timecode, frame);
 					}
 					catch (FileNotFoundException e)
 					{
-						return e;
+						logger.error("File Not Found: {}", frame.getAbsolutePath());
+						logger.catching(e);
 					}
 					return null;
-				});
-				FileNotFoundException e2 = e1.get();
-				if (e2 != null)
+				}).get();
+				if (message == null)
 				{
-					logger.error("File Not Found: {}", frame.getAbsolutePath());
-					logger.catching(e2);
 					RequestBuffer.request(() -> {
 						job.channel.sendMessage("Frame was not Extracted!");
 					});
 					return false;
 				}
-				logger.info("File Uploaded");
+				else
+				{
+					db.declareExtraction(job.author.getLongID(), job.channel.getGuild().getLongID(), job.filename, job.timecode, job.frameCount,
+							message.getAttachments().get(0).getUrl());
+
+				}
+				logger.info("{} Uploaded", job.filename);
 				return true;
 			}
 			else
 			{
 				logger.error("Process Failed, Error: {}", exitValue);
 				RequestBuffer.request(() -> {
-					job.channel.sendMessage("Extraction Failed, check Console for errors");
+					job.channel.sendMessage(":no_entry_sign: Extraction Failed, check Console for errors");
 				});
 				return false;
 			}
@@ -425,7 +477,7 @@ public class Extractor
 		{
 			logger.catching(e1);
 			RequestBuffer.request(() -> {
-				job.channel.sendMessage("Could not start Process.");
+				job.channel.sendMessage(":radioactive: Could not start Process.");
 			});
 			return false;
 		}
@@ -522,7 +574,7 @@ public class Extractor
 				if (duration == null || fps == null)//No Video Stream Found
 				{
 					logger.warn("File `{}` has no Video Streams, hiding in Database");
-					db.removeVideo(job.filename);
+					db.setVideoUnusable(job.filename, false);
 					return false;
 				}
 				else if (duration.equals("N/A"))//Container does not support per stream durations
@@ -547,6 +599,7 @@ public class Extractor
 				RequestBuffer.request(() -> {
 					job.channel.sendMessage("Probing Failed, check Console for errors");
 				});
+				db.setVideoUnusable(job.filename, false);
 			}
 		}
 		catch (IOException e1)
@@ -555,11 +608,12 @@ public class Extractor
 			RequestBuffer.request(() -> {
 				job.channel.sendMessage("Could not start Probing Process for File: " + job.filename);
 			});
+			db.setVideoUnusable(job.filename, false);
 		}
 		return false;
 	}
 
-	private String convertMilliToTIme(long time)
+	public static String convertMilliToTime(long time)
 	{
 		String hours = String.format("%02d", (time / (1000 * 60 * 60)) % 24);
 		String minutes = String.format("%02d", (time / (1000 * 60)) % 60);
@@ -568,7 +622,7 @@ public class Extractor
 		return hours + ":" + minutes + ":" + seconds + "." + milli;
 	}
 
-	private long convertTimeToMilli(String time, Integer frameCount, String framerate)
+	public static long convertTimeToMilli(String time, Integer frameCount, String framerate)
 	{
 		try
 		{
@@ -591,12 +645,12 @@ public class Extractor
 			throw new IllegalArgumentException();
 		}
 	}
-	
+
 	public void normalStatus()
 	{
 		try
 		{
-			int videoCount = db.getVisibleVideoCount();
+			int videoCount = db.getVisibleVideoCount(false);
 			if (videoCount > 0)
 				client.changePresence(StatusType.ONLINE, ActivityType.WATCHING, videoCount + " videos");
 			else
@@ -607,6 +661,13 @@ public class Extractor
 			logger.error("Database not initalized yet", f);
 			client.changePresence(StatusType.INVISIBLE);
 		}
+	}
+
+	public static long localSecondsUntilMidnight()
+	{
+		LocalDateTime now = LocalDateTime.now();
+		LocalDateTime midnight = LocalDate.now().plusDays(1).atStartOfDay();
+		return Duration.between(now, midnight).getSeconds();
 	}
 
 	private class TimestampJob
@@ -628,14 +689,16 @@ public class Extractor
 		private String filename;
 		private String timecode;
 		private Integer frameCount;
+		private NormalUser person;
 
-		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n)
+		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n, NormalUser p)
 		{
 			channel = c;
 			author = u;
 			filename = f;
 			timecode = t;
 			frameCount = n;
+			person = p;
 		}
 	}
 }
