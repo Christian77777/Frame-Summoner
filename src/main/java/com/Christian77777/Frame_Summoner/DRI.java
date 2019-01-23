@@ -48,6 +48,8 @@ import sx.blah.discord.api.ClientBuilder;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.ReadyEvent;
+import sx.blah.discord.handle.impl.events.guild.channel.message.MessageReceivedEvent;
+import sx.blah.discord.handle.impl.events.guild.channel.message.MessageSendEvent;
 import sx.blah.discord.util.DiscordException;
 
 /**
@@ -60,7 +62,8 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("2.0.0a");
+	public static final String version = new String("2.0.0a");
+	public static final String prefix = new String("fs!");
 	public static TrayMenu menu;
 	private IDiscordClient api;
 	private CommandListener actions;
@@ -108,7 +111,7 @@ public class DRI implements IListener<ReadyEvent>
 		}
 		ClientBuilder clientBuilder = new ClientBuilder();
 		clientBuilder.withToken(prop.getProperty("Discord_Token"));
-		clientBuilder.registerListener(new GuildSetup(db, prop));
+		clientBuilder.registerListener(new GuildSetup(db, prop, prefix));
 		clientBuilder.registerListener(new NewChannel(db));
 		clientBuilder.registerListener(new ChannelDeleted(db));
 		try
@@ -129,7 +132,7 @@ public class DRI implements IListener<ReadyEvent>
 		Thread.currentThread().setName("DiscordConnectionThread");
 		this.api = event.getClient();
 		logger.info("Connected to Discord");
-		actions = new CommandListener(new UserActivity(this, api, db, prop).getRegistry());
+		actions = new CommandListener(new UserActivity(this, api, db, prop, prefix).getRegistry());
 		api.getDispatcher().registerListener(actions);
 		//TODO Announce arrival
 		menu.setupComplete();
@@ -225,6 +228,26 @@ public class DRI implements IListener<ReadyEvent>
 						logger.error("Config not properly configured, \nKey: `Bot_Manager` is not a parsable SnowflakeID");
 						readFailed = true;
 					}
+				}
+				value = prop.getProperty("MaxUserExtracts");
+				try
+				{
+					Byte.parseByte(value);
+				}
+				catch (NullPointerException | NumberFormatException e)
+				{
+					logger.error("Config not properly configured, \nKey: `MaxUserExtracts` is not a number less then 128");
+					readFailed = true;
+				}
+				value = prop.getProperty("MaxServerExtracts");
+				try
+				{
+					Integer.parseInt(value);
+				}
+				catch (NullPointerException | NumberFormatException e)
+				{
+					logger.error("Config not properly configured, \nKey: `MaxServerExtracts` is not a number less then 2 million");
+					readFailed = true;
 				}
 				value = prop.getProperty("FFmpeg_Path");
 				if (value != null && !new File(value).exists())
