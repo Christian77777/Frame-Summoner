@@ -48,8 +48,6 @@ import sx.blah.discord.api.ClientBuilder;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.ReadyEvent;
-import sx.blah.discord.handle.impl.events.guild.channel.message.MessageReceivedEvent;
-import sx.blah.discord.handle.impl.events.guild.channel.message.MessageSendEvent;
 import sx.blah.discord.util.DiscordException;
 
 /**
@@ -58,11 +56,10 @@ import sx.blah.discord.util.DiscordException;
  */
 public class DRI implements IListener<ReadyEvent>
 {
-
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static final String version = new String("2.0.0a");
+	public static final String version = new String("2.0.0b");
 	public static final String prefix = new String("fs!");
 	public static TrayMenu menu;
 	private IDiscordClient api;

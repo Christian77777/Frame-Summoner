@@ -5,7 +5,7 @@ package com.Christian77777.Frame_Summoner.Limiters;
 
 import java.util.ArrayList;
 import com.Christian77777.Frame_Summoner.Database;
-import com.Christian77777.Frame_Summoner.Database.RolePerm;
+import com.Christian77777.Frame_Summoner.Database.DBRolePerm;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.limiter.Limiter;
 import sx.blah.discord.handle.obj.IGuild;
@@ -20,26 +20,38 @@ import sx.blah.discord.util.RequestBuffer;
 public class ListedLimiter implements Limiter
 {
 	private Database db;
+	private boolean failPrivately;
+	
 	/**
 	 * 
 	 */
-	public ListedLimiter(Database d)
+	public ListedLimiter(Database d, boolean failPrivately)
 	{
 		db = d;
+		this.failPrivately = failPrivately;
 	}
 
 	@Override
 	public boolean check(CommandContext ctx)
 	{
-		return checkWhitelisted(db, ctx.getGuild(), ctx.getAuthor()) || AdminLimiter.checkServerOwner(ctx.getGuild(), ctx.getAuthor()) || AdminLimiter.checkAdmin(db, ctx.getGuild(), ctx.getAuthor());
+		return checkWhitelisted(db, ctx.getGuild(), ctx.getAuthor());
 	}
 	
 	@Override
 	public void onFail(CommandContext ctx)
 	{
-		RequestBuffer.request(() -> {
-			ctx.getChannel().sendMessage(":no_entry_sign: You are not authorized to use this command");
-		});
+		if(failPrivately)
+		{
+			RequestBuffer.request(() -> {
+				ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry_sign: You are not authorized to use this command in this server");
+			});
+		}
+		else
+		{
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(":no_entry_sign: You are not authorized to use this command in this server");
+			});
+		}
 	}
 	
 	/**
@@ -75,7 +87,7 @@ public class ListedLimiter implements Limiter
 			}
 		}
 		//Get already sorted list of relevant roles for Guild
-		ArrayList<RolePerm> rolePerms = db.getReleventRoles(guild.getLongID());
+		ArrayList<DBRolePerm> rolePerms = db.getReleventRoles(guild.getLongID());
 		if (!rolePerms.isEmpty())
 		{
 			boolean isBlacklist = rolePerms.get(0).getBlackVSWhite();//Hints Guild Listing Mode

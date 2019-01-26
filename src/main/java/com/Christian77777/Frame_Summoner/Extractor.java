@@ -9,7 +9,6 @@ import java.io.InputStreamReader;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.LinkedList;
 import java.util.Properties;
 import java.util.Queue;
@@ -20,8 +19,9 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import com.Christian77777.Frame_Summoner.Database.NormalUser;
-import com.Christian77777.Frame_Summoner.Database.Video;
+import com.Christian77777.Frame_Summoner.Database.DBGuild;
+import com.Christian77777.Frame_Summoner.Database.DBNormalUser;
+import com.Christian77777.Frame_Summoner.Database.DBVideo;
 import com.darichey.discord.CommandContext;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.handle.obj.ActivityType;
@@ -30,7 +30,6 @@ import sx.blah.discord.handle.obj.IMessage;
 import sx.blah.discord.handle.obj.IUser;
 import sx.blah.discord.handle.obj.StatusType;
 import sx.blah.discord.util.RequestBuffer;
-import sx.blah.discord.util.RequestBuffer.RequestFuture;
 
 public class Extractor
 {
@@ -59,7 +58,8 @@ public class Extractor
 		long seconds = localSecondsUntilMidnight();
 		midnightReset.scheduleWithFixedDelay(() -> {
 			Thread.currentThread().setName("MidnightReset");
-			db.resetDailyUsage(0, null);
+			db.updateUserDailyUsage(0, null);
+			db.updateServerDailyUsage(0, null);
 			logger.info("Daily Usage Reset");
 		}, seconds, 24 * 60 * 60, TimeUnit.SECONDS);
 		logger.info("Next Reset takes place in {}", convertMilliToTime(seconds * 1000));
@@ -298,7 +298,7 @@ public class Extractor
 		if (running)
 		{
 			File video = new File(prop.getProperty("Video_Directory") + File.separator + filename);
-			NormalUser person = db.getUserUsage(ctx.getAuthor().getLongID());
+			DBNormalUser person = db.getUserUsage(ctx.getAuthor().getLongID());
 			int maxUserExtracts = Integer.valueOf(prop.getProperty("MaxUserExtracts"));
 			//Permission Denied if Globally banned.
 			if (person != null)
@@ -307,21 +307,31 @@ public class Extractor
 				if (person.isBanned())
 				{
 					RequestBuffer.request(() -> {
-						ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry_sign: You are banned interacting with Frame-Summoner");
+						ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry_sign: You are banned from Requesting Frames from Frame-Summoner");
 					});
 					return false;
 				}
-				//Permission Denied if not VIP and over the maximum number of extractions
+				//Permission Denied if not VIP and over the maximum number of extractions per User
 				if (person.getUsedToday() >= maxUserExtracts && !(person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager"))))
 				{
 					RequestBuffer.request(() -> {
-						ctx.getAuthor().getOrCreatePMChannel().sendMessage(":clock3: You have reached the max of `" + maxUserExtracts
+						ctx.getChannel().sendMessage(":clock3: You have reached the max of `" + maxUserExtracts
+								+ "` Frames per day. Reset in `" + convertMilliToTime(localSecondsUntilMidnight() * 1000) + "`");
+					});
+					return false;
+				}
+				//Permission Denied if not VIP and over the maximum number of extractions per Server
+				DBGuild g = db.getServerData(ctx.getGuild().getLongID());
+				if ((!g.isEnabled() || g.getUsedToday() >= g.getRequestLimit()) && !(person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager"))))
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":clock3: This Server has reached the maximum of `" + g.getRequestLimit()
 								+ "` Frames per day. Reset in `" + convertMilliToTime(localSecondsUntilMidnight() * 1000) + "`");
 					});
 					return false;
 				}
 			}
-			Video data = db.getVideoData(filename);
+			DBVideo data = db.getVideoData(filename);
 			//Extraction cancelled if video is not even recorded at all
 			if (data == null || !data.isUsable())
 			{
@@ -399,7 +409,7 @@ public class Extractor
 		}
 		//Extraction by exact time code: ffmpeg -ss ##:##:##.### -i "C:\Path\to\Video" -t 1 -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
 		//Extraction by Timestamp and frame number in range [0,fps):ffmpeg -ss ##:##:## -i "C:\Path\to\Video" -filter:v "select=gte(n/,%%FRAMENUMBER)" -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
-		String command = prop.getProperty("FFmpeg_Path") + " -loglevel quiet -y -ss " + job.timecode + " -i \"" + video.getAbsolutePath() + "\" "
+		String command = "\"" + prop.getProperty("FFmpeg_Path") + "\" -loglevel quiet -y -ss " + job.timecode + " -i \"" + video.getAbsolutePath() + "\" "
 				+ framecut + "-f image2 -frames:v 1 \"" + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.filename
 				+ ".png\"";
 		try
@@ -536,8 +546,8 @@ public class Extractor
 		 * [video duration] <-Priority
 		 * [format duration]
 		 */
-		String command = prop.getProperty("FFprobe_Path")
-				+ " -v error -show_entries format=duration:stream=r_frame_rate:stream=duration -select_streams v:0 -print_format default=noprint_wrappers=1:nokey=1 -sexagesimal \""
+		String command = "\"" + prop.getProperty("FFprobe_Path")
+				+ "\" -v error -show_entries format=duration:stream=r_frame_rate:stream=duration -select_streams v:0 -print_format default=noprint_wrappers=1:nokey=1 -sexagesimal \""
 				+ video.getAbsolutePath() + "\"";
 		try
 		{
@@ -689,9 +699,9 @@ public class Extractor
 		private String filename;
 		private String timecode;
 		private Integer frameCount;
-		private NormalUser person;
+		private DBNormalUser person;
 
-		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n, NormalUser p)
+		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n, DBNormalUser p)
 		{
 			channel = c;
 			author = u;
