@@ -17,11 +17,14 @@ public class VIPLimiter implements Limiter
 {
 	private Database db;
 	private Properties prop;
+	private boolean failPrivately;
+
 	
-	public VIPLimiter(Database db, Properties p)
+	public VIPLimiter(Database db, Properties p, boolean failPrivately)
 	{
 		this.db = db;
 		prop = p;
+		this.failPrivately = failPrivately;
 	}
 
 	@Override
@@ -33,9 +36,18 @@ public class VIPLimiter implements Limiter
 	@Override
 	public void onFail(CommandContext ctx)
 	{
-		RequestBuffer.request(() -> {
-			ctx.getChannel().sendMessage(":no_entry: You must be a :large_orange_diamond: VIP to use this Command");
-		});
+		if (failPrivately)
+		{
+			RequestBuffer.request(() -> {
+				ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry: You must be a :large_orange_diamond: VIP to use this Command");
+			});
+		}
+		else
+		{
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(":no_entry: You must be a :large_orange_diamond: VIP to use this Command");
+			});
+		}
 	}
 	
 	public static boolean checkOperator(Properties prop, long userID)

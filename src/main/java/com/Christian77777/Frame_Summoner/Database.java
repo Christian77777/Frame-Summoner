@@ -46,6 +46,7 @@ import org.sqlite.SQLiteOpenMode;
  */
 public class Database
 {
+
 	private static String directory;
 	private static Logger logger = LogManager.getLogger();
 	private String connectionPath;
@@ -57,7 +58,7 @@ public class Database
 			psRemoveVideo, psAddOrUpdateVideo, psGetVideoByFilename, psCheckIFVIP, psWipeAllVideos, psCountVisibleVideos, psCheckChannelTier,
 			psGetRolePerms, psCheckGuildBlacklistMode, psChangeGuildBlacklistMode, psRemoveAllUserRoles, psUpdateChannelTier,
 			psUpdateChannelAnnoucements, psGetVideoList, psSetVideoUsability, psSetVideoRestricted, psSetAllVideosRestricted, psGetUserData,
-			psRecordExtraction, psUpdateUserDailyUsage, psUpdateDailyUsage;
+			psRecordExtraction, psUpdateUserDailyUsage, psUpdateAllUserDailyUsage, psGetServerUsage, psUpdateServerDailyUsage, psUpdateAllServerDailyUsage;
 
 	public static void main(String[] args) throws SQLException
 	{
@@ -163,6 +164,30 @@ public class Database
 			}
 		}
 		lock.unlock();
+	}
+
+	/**
+	 * Runs any command given by @author on SQLite Database
+	 * Nothing is verified, or sanitized
+	 * @param s The Command to run
+	 * @return if the SQL Executed successfully or not.
+	 */
+	public boolean executeDebugUpdate(String s)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			Statement stmt = c.createStatement();
+			stmt.executeUpdate(s);
+			result = true;
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
 	}
 
 	/**
@@ -340,6 +365,14 @@ public class Database
 		lock.lock();
 		try
 		{
+			if(tier > 0)//Upsert
+			{
+				
+			}
+			else//Delete Where
+			{
+				
+			}
 			psUpdateChannelTier.setInt(1, tier);
 			psUpdateChannelTier.setLong(2, channelID);
 			psUpdateChannelTier.setLong(3, guildID);
@@ -753,9 +786,9 @@ public class Database
 	 * @param filename Name of File
 	 * @return Object array with the first 3 slots being String, and the last slot being a boolean
 	 */
-	public Video getVideoData(String filename)
+	public DBVideo getVideoData(String filename)
 	{
-		Video result = null;
+		DBVideo result = null;
 		lock.lock();
 		try
 		{
@@ -763,7 +796,7 @@ public class Database
 			ResultSet rs = psGetVideoByFilename.executeQuery();
 			if (rs.next())//Exists at all
 			{
-				result = new Video(filename, rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getBoolean(4), rs.getBoolean(5));
+				result = new DBVideo(filename, rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getBoolean(4), rs.getBoolean(5));
 			}
 			rs.close();
 		}
@@ -824,7 +857,8 @@ public class Database
 			}
 			else
 			{
-				logger.warn("Channel `{}` does not Exist!", channel);
+				if(0 >= tier)
+					result = true;
 			}
 			rs.close();
 		}
@@ -841,9 +875,9 @@ public class Database
 	 * @param filename Name of File
 	 * @return Object array with the first 3 slots being String, and the last slot being a boolean
 	 */
-	public ArrayList<RolePerm> getReleventRoles(long id)
+	public ArrayList<DBRolePerm> getReleventRoles(long id)
 	{
-		ArrayList<RolePerm> result = new ArrayList<RolePerm>();
+		ArrayList<DBRolePerm> result = new ArrayList<DBRolePerm>();
 		lock.lock();
 		try
 		{
@@ -851,7 +885,7 @@ public class Database
 			ResultSet rs = psGetRolePerms.executeQuery();
 			while (rs.next())//Exists at all
 			{
-				result.add(new RolePerm(rs.getLong(1), rs.getBoolean(2)));
+				result.add(new DBRolePerm(rs.getLong(1), rs.getBoolean(2)));
 			}
 			rs.close();
 		}
@@ -899,16 +933,16 @@ public class Database
 	 * @param filename Name of File
 	 * @return Object array with the first 3 slots being String, and the last slot being a boolean
 	 */
-	public ArrayList<Video> getVideoList()
+	public ArrayList<DBVideo> getVideoList()
 	{
-		ArrayList<Video> result = new ArrayList<Video>();
+		ArrayList<DBVideo> result = new ArrayList<DBVideo>();
 		lock.lock();
 		try
 		{
 			ResultSet rs = psGetVideoList.executeQuery();
 			while (rs.next())//Exists at all
 			{
-				result.add(new Video(rs.getString(1), rs.getLong(2), -1, rs.getString(3), rs.getBoolean(4), rs.getBoolean(5)));
+				result.add(new DBVideo(rs.getString(1), rs.getLong(2), -1, rs.getString(3), rs.getBoolean(4), rs.getBoolean(5)));
 			}
 			rs.close();
 		}
@@ -1009,9 +1043,9 @@ public class Database
 	 * @param userID the UserID of the User
 	 * @return null if the user does not exist, or a NormalUser object
 	 */
-	public NormalUser getUserUsage(long userID)
+	public DBNormalUser getUserUsage(long userID)
 	{
-		NormalUser user = null;
+		DBNormalUser user = null;
 		lock.lock();
 		try
 		{
@@ -1019,7 +1053,7 @@ public class Database
 			ResultSet rs = psGetUserData.executeQuery();
 			if (rs.next())
 			{
-				user = new NormalUser(userID, rs.getInt(1), rs.getInt(2), rs.getBoolean(3), rs.getBoolean(4));
+				user = new DBNormalUser(userID, rs.getInt(1), rs.getInt(2), rs.getBoolean(3), rs.getBoolean(4));
 			}
 			else
 			{
@@ -1033,6 +1067,37 @@ public class Database
 		}
 		lock.unlock();
 		return user;
+	}
+
+	/**
+	 * Get the Number of Extractions a Server has done
+	 * @param guildID the UserID of the User
+	 * @return null if the user does not exist, or a NormalUser object
+	 */
+	public DBGuild getServerData(long guildID)
+	{
+		DBGuild guild = null;
+		lock.lock();
+		try
+		{
+			psGetServerUsage.setLong(1, guildID);
+			ResultSet rs = psGetServerUsage.executeQuery();
+			if (rs.next())
+			{
+				guild = new DBGuild(rs.getLong(1), rs.getInt(2), rs.getInt(3), rs.getBoolean(4), rs.getBoolean(5));
+			}
+			else
+			{
+				logger.warn("GuildID `{}` does not Exist!", guildID);
+			}
+			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return guild;
 	}
 
 	/**
@@ -1077,7 +1142,7 @@ public class Database
 	 * @param userID if supplied, restricts the change to this userID only
 	 * @return if the SQL executed properly or if the userID was supplied, if a user was modified.
 	 */
-	public boolean resetDailyUsage(int newUsage, Long userID)
+	public boolean updateUserDailyUsage(int newUsage, Long userID)
 	{
 		boolean result = false;
 		lock.lock();
@@ -1085,8 +1150,8 @@ public class Database
 		{
 			if (userID == null)
 			{
-				psUpdateDailyUsage.setInt(1, newUsage);
-				psUpdateDailyUsage.executeUpdate();
+				psUpdateAllUserDailyUsage.setInt(1, newUsage);
+				psUpdateAllUserDailyUsage.executeUpdate();
 				result = true;
 			}
 			else
@@ -1104,6 +1169,68 @@ public class Database
 		}
 		lock.unlock();
 		return result;
+	}
+
+	/**
+	 * Modifies a Server's Daily Usage
+	 * @param newUsage the new value, to set the day's Usage to
+	 * @param guildID if supplied, restricts the change to this guildID only
+	 * @return if the SQL executed properly or if the guildID was supplied, if a guild was modified.
+	 */
+	public boolean updateServerDailyUsage(int newUsage, Long guildID)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			if (guildID == null)
+			{
+				psUpdateAllServerDailyUsage.setInt(1, newUsage);
+				psUpdateAllServerDailyUsage.executeUpdate();
+				result = true;
+			}
+			else
+			{
+				psUpdateServerDailyUsage.setInt(1, newUsage);
+				psUpdateServerDailyUsage.setLong(2, guildID);
+				psUpdateServerDailyUsage.executeUpdate();
+				if (psUpdateServerDailyUsage.getUpdateCount() > 0)
+					result = true;
+			}
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+	
+	/**
+	 * Get the Channels in their permissions
+	 * @param guildID the UserID of the User
+	 * @return null if the user does not exist, or a NormalUser object
+	 */
+	public ArrayList<DBChannel> getServerChannels(long guildID)
+	{
+		ArrayList<DBChannel> channels = new ArrayList<DBChannel>();
+		lock.lock();
+		try
+		{
+			psListOfConfiguredChannels.setLong(1, guildID);
+			ResultSet rs = psListOfConfiguredChannels.executeQuery();
+			while(rs.next())
+			{
+				channels.add(new DBChannel(rs.getLong(1), rs.getInt(2), rs.getBoolean(3)));
+			}
+			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return channels;
 	}
 
 	private void generateTablesAndTriggers(Statement stmt) throws SQLException
@@ -1128,8 +1255,9 @@ public class Database
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `Videos` ( `Filename` TEXT NOT NULL UNIQUE, `Length` INTEGER NOT NULL, `Offset` INTEGER NOT NULL, `Fps` STRING NOT NULL, `Restricted` INTEGER NOT NULL DEFAULT 0, `Usable` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`Filename`) )");
 		//CreateTriggers
+		stmt.executeUpdate("DROP TRIGGER IF EXISTS AutoAddExtractionRecordUser;");
 		stmt.executeUpdate(
-				"CREATE TRIGGER IF NOT EXISTS AutoAddExtractionRecordUser BEFORE INSERT ON `ExtractionRecord` BEGIN INSERT INTO UserRecord VALUES(NEW.UserID,1,1,0,0) ON CONFLICT (`UserID`) DO UPDATE SET `TimesUsed` = `TimesUsed` + 1, `UsedToday` = `UsedToday` + 1; END");
+				"CREATE TRIGGER IF NOT EXISTS AutoAddExtractionRecordUser BEFORE INSERT ON `ExtractionRecord` BEGIN INSERT INTO UserRecord VALUES(NEW.UserID,1,1,0,0) ON CONFLICT (`UserID`) DO UPDATE SET `TimesUsed` = `TimesUsed` + 1, `UsedToday` = `UsedToday` + 1; UPDATE `Guilds` SET `UsedToday` = `UsedToday` + 1 WHERE `GuildID` = NEW.GuildID;END");
 	}
 
 	private void generateStatements() throws SQLException
@@ -1138,7 +1266,7 @@ public class Database
 		psAddNewGuild = c.prepareStatement("INSERT INTO `Guilds` VALUES(?,1000,0,1,1);");
 		psRemoveGuild = c.prepareStatement("DELETE FROM `Guilds` WHERE `GuildID` = ?;");
 		psAddNewChannel = c.prepareStatement("INSERT INTO `ChannelPerms` VALUES(?,?,?,?);");
-		psListOfConfiguredChannels = c.prepareStatement("SELECT `ChannelID` FROM `ChannelPerms` WHERE `GuildID` = ?;");
+		psListOfConfiguredChannels = c.prepareStatement("SELECT `ChannelID`, `Permission`, `Annoucements` FROM `ChannelPerms` WHERE `GuildID` = ?;");
 		psRemoveChannel = c.prepareStatement("DELETE FROM `ChannelPerms` WHERE `ChannelID` = ?;");
 		psAddNewAdminRole = c.prepareStatement("INSERT INTO `AdminRoles` VALUES(?,?);");
 		psListOfAdminRoles = c.prepareStatement("SELECT `RoleID` FROM `AdminRoles` WHERE `GuildID` = ? ORDER BY `RoleID` ASC;");
@@ -1171,18 +1299,53 @@ public class Database
 		psGetUserData = c.prepareStatement("SELECT `TimesUsed`, `UsedToday`, `GlobalBan`, `VIP` FROM `UserRecord` WHERE `UserID`= ? LIMIT 1;");
 		psRecordExtraction = c.prepareStatement("INSERT INTO `ExtractionRecord` VALUES(?,?,?,?,?,?,?);");
 		psUpdateUserDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ? WHERE `UserID` = ?");
-		psUpdateDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ?");
+		psUpdateAllUserDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ?");
+		psGetServerUsage = c.prepareStatement("SELECT `GuildID`, `RequestLimit`, `UsedToday`, `Enabled`, `isBlacklist` FROM `Guilds` WHERE `GuildID` = ? LIMIT 1");
+		psUpdateServerDailyUsage = c.prepareStatement("UPDATE `Guilds` SET `UsedToday` = ? WHERE `GuildID` = ?");
+		psUpdateAllServerDailyUsage = c.prepareStatement("UPDATE `Guilds` SET `UsedToday` = ?");
+	}
+	
+	public class DBChannel
+	{
+		private long id;
+		private int tier;
+		private boolean annoucement;
+		
+		private DBChannel(long id, int tier, boolean annoucement)
+		{
+			this.id = id;
+			this.tier = tier;
+			this.annoucement = annoucement;
+		}
+		
+		public long getId()
+		{
+			return id;
+		}
+
+		
+		public int getTier()
+		{
+			return tier;
+		}
+
+		
+		public boolean isAnnoucement()
+		{
+			return annoucement;
+		}
 	}
 
-	public class NormalUser
+	public class DBNormalUser
 	{
+
 		private long id;
 		private int totalUsed;
 		private int usedToday;
 		private boolean banned;
 		private boolean vip;
 
-		private NormalUser(long id, int totalUsed, int usedToday, boolean banned, boolean vip)
+		private DBNormalUser(long id, int totalUsed, int usedToday, boolean banned, boolean vip)
 		{
 			this.id = id;
 			this.totalUsed = totalUsed;
@@ -1217,12 +1380,13 @@ public class Database
 		}
 	}
 
-	public class RolePerm
+	public class DBRolePerm
 	{
+
 		private long roleID;
 		private boolean blackVSwhite;
 
-		private RolePerm(long roleID, boolean blackVSwhite)
+		private DBRolePerm(long roleID, boolean blackVSwhite)
 		{
 			this.roleID = roleID;
 			this.blackVSwhite = blackVSwhite;
@@ -1239,8 +1403,9 @@ public class Database
 		}
 	}
 
-	public class Video
+	public class DBVideo
 	{
+
 		private String name;
 		private long length;
 		private long offset;
@@ -1248,7 +1413,7 @@ public class Database
 		private boolean restricted;
 		private boolean usable;
 
-		private Video(String n, long l, long o, String s, boolean r, boolean u)
+		private DBVideo(String n, long l, long o, String s, boolean r, boolean u)
 		{
 			name = n;
 			length = l;
@@ -1287,5 +1452,50 @@ public class Database
 		{
 			return usable;
 		}
+	}
+
+	public class DBGuild
+	{
+
+		private long guildID;
+		private int requestLimit;
+		private int usedToday;
+		private boolean enabled;
+		private boolean isBlacklistMode;
+
+		private DBGuild(long g, int r, int u, boolean e, boolean b)
+		{
+			guildID = g;
+			requestLimit = r;
+			usedToday = u;
+			enabled = e;
+			isBlacklistMode = b;
+		}
+
+		public long getGuildID()
+		{
+			return guildID;
+		}
+
+		public int getRequestLimit()
+		{
+			return requestLimit;
+		}
+
+		public int getUsedToday()
+		{
+			return usedToday;
+		}
+
+		public boolean isEnabled()
+		{
+			return enabled;
+		}
+
+		public boolean isBlacklistMode()
+		{
+			return isBlacklistMode;
+		}
+
 	}
 }

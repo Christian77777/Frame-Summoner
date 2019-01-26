@@ -20,19 +20,28 @@ import sx.blah.discord.util.RequestBuffer;
  */
 public class AdminLimiter implements Limiter
 {
+
 	private Database db;
 	private boolean allowPrivate;
-	
-	public AdminLimiter(Database d, boolean allowPrivate)
+	private boolean failPrivately;
+
+	/**
+	 * Create Limiter that checks if User has admin privileges in the specified server
+	 * @param d The Database that stores the information
+	 * @param allowPrivate If Admin commands sent by private messages should pass
+	 * @param failPrivately If users should be informed that they are not authorized in Private messages instead
+	 */
+	public AdminLimiter(Database d, boolean allowPrivate, boolean failPrivately)
 	{
 		db = d;
 		this.allowPrivate = allowPrivate;
+		this.failPrivately = failPrivately;
 	}
 
 	@Override
 	public boolean check(CommandContext ctx)
 	{
-		if(ctx.getChannel().isPrivate())
+		if (ctx.getChannel().isPrivate())
 			return allowPrivate;
 		return checkServerOwner(ctx.getGuild(), ctx.getAuthor()) || checkAdmin(db, ctx.getGuild(), ctx.getAuthor());
 	}
@@ -40,9 +49,20 @@ public class AdminLimiter implements Limiter
 	@Override
 	public void onFail(CommandContext ctx)
 	{
-		RequestBuffer.request(() -> {
-			ctx.getChannel().sendMessage(":no_entry: You must be an :a: Admin of the " + ctx.getGuild().getName() + " Server to use this Command here");
-		});
+		if (failPrivately)
+		{
+			RequestBuffer.request(() -> {
+				ctx.getAuthor().getOrCreatePMChannel()
+						.sendMessage(":no_entry: You must be an :a: Admin of the " + ctx.getGuild().getName() + " Server to use this Command here");
+			});
+		}
+		else
+		{
+			RequestBuffer.request(() -> {
+				ctx.getChannel()
+						.sendMessage(":no_entry: You must be an :a: Admin of the " + ctx.getGuild().getName() + " Server to use this Command here");
+			});
+		}
 	}
 
 	/**
@@ -71,7 +91,7 @@ public class AdminLimiter implements Limiter
 						break;
 					}
 				}
-				if(!wasInserted)
+				if (!wasInserted)
 					actualRoles.add(r.getLongID());
 			}
 		}
@@ -96,7 +116,7 @@ public class AdminLimiter implements Limiter
 		}
 		return false;
 	}
-	
+
 	public static boolean checkServerOwner(IGuild guild, IUser user)
 	{
 		return guild.getOwnerLongID() == user.getLongID() ? true : false;
