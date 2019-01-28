@@ -300,6 +300,7 @@ public class Extractor
 			File video = new File(prop.getProperty("Video_Directory") + File.separator + filename);
 			DBNormalUser person = db.getUserUsage(ctx.getAuthor().getLongID());
 			int maxUserExtracts = Integer.valueOf(prop.getProperty("MaxUserExtracts"));
+			boolean isVIP = person != null && (person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager")));
 			//Permission Denied if Globally banned.
 			if (person != null)
 			{
@@ -307,29 +308,30 @@ public class Extractor
 				if (person.isBanned())
 				{
 					RequestBuffer.request(() -> {
-						ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry_sign: You are banned from Requesting Frames from Frame-Summoner");
+						ctx.getAuthor().getOrCreatePMChannel()
+								.sendMessage(":no_entry_sign: You are banned from Requesting Frames from Frame-Summoner");
 					});
 					return false;
 				}
 				//Permission Denied if not VIP and over the maximum number of extractions per User
-				if (person.getUsedToday() >= maxUserExtracts && !(person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager"))))
+				if (!isVIP || person.getUsedToday() >= maxUserExtracts)
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":clock3: You have reached the max of `" + maxUserExtracts
+						ctx.getChannel().sendMessage(":clock3: You have reached the daily limit of `" + maxUserExtracts
 								+ "` Frames per day. Reset in `" + convertMilliToTime(localSecondsUntilMidnight() * 1000) + "`");
 					});
 					return false;
 				}
-				//Permission Denied if not VIP and over the maximum number of extractions per Server
-				DBGuild g = db.getServerData(ctx.getGuild().getLongID());
-				if ((!g.isEnabled() || g.getUsedToday() >= g.getRequestLimit()) && !(person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager"))))
-				{
-					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":clock3: This Server has reached the maximum of `" + g.getRequestLimit()
-								+ "` Frames per day. Reset in `" + convertMilliToTime(localSecondsUntilMidnight() * 1000) + "`");
-					});
-					return false;
-				}
+			}
+
+			//Permission Denied if not VIP and over the maximum number of extractions per Server
+			DBGuild g = db.getServerData(ctx.getGuild().getLongID());
+			if (!g.isEnabled() || (!isVIP && g.getUsedToday() >= g.getRequestLimit()))
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":red_circle: This Server is disabled from extracting Frames until it is reenabled.");
+				});
+				return false;
 			}
 			DBVideo data = db.getVideoData(filename);
 			//Extraction cancelled if video is not even recorded at all
@@ -342,7 +344,7 @@ public class Extractor
 				return false;
 			}
 			//Permission denied if Video is not visible with the users current permission level
-			if (data.isRestricted() && !person.isVip())
+			if (data.isRestricted() && !isVIP)
 			{
 				logger.warn("Video Not Accessible: {}", video.getAbsolutePath());
 				RequestBuffer.request(() -> {
@@ -362,7 +364,7 @@ public class Extractor
 				});
 				return false;
 			}
-			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), filename, timecode, frameCount, person)))//Add to Queue if not too full
+			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), filename, timecode, frameCount)))//Add to Queue if not too full
 			{
 				RequestBuffer.request(() -> {
 					ctx.getMessage().addReaction(UserActivity.confirm);
@@ -409,8 +411,8 @@ public class Extractor
 		}
 		//Extraction by exact time code: ffmpeg -ss ##:##:##.### -i "C:\Path\to\Video" -t 1 -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
 		//Extraction by Timestamp and frame number in range [0,fps):ffmpeg -ss ##:##:## -i "C:\Path\to\Video" -filter:v "select=gte(n/,%%FRAMENUMBER)" -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
-		String command = "\"" + prop.getProperty("FFmpeg_Path") + "\" -loglevel quiet -y -ss " + job.timecode + " -i \"" + video.getAbsolutePath() + "\" "
-				+ framecut + "-f image2 -frames:v 1 \"" + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.filename
+		String command = "\"" + prop.getProperty("FFmpeg_Path") + "\" -loglevel quiet -y -ss " + job.timecode + " -i \"" + video.getAbsolutePath()
+				+ "\" " + framecut + "-f image2 -frames:v 1 \"" + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.filename
 				+ ".png\"";
 		try
 		{
@@ -699,16 +701,14 @@ public class Extractor
 		private String filename;
 		private String timecode;
 		private Integer frameCount;
-		private DBNormalUser person;
 
-		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n, DBNormalUser p)
+		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n)
 		{
 			channel = c;
 			author = u;
 			filename = f;
 			timecode = t;
 			frameCount = n;
-			person = p;
 		}
 	}
 }
