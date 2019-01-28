@@ -122,6 +122,11 @@ public class UserActivity
 		{ tier3L, vipL });
 		addSetServerUsage(2, new Limiter[]
 		{ tier3L, vipL });
+		addSetServerLimit(2, new Limiter[]
+		{ tier3L, vipL });
+		addDisableServerCommand(2, new Limiter[]
+		{ tier3L, vipL });
+
 		//Admin Commands
 		addNewAdminRoleCommand(1, new Limiter[]
 		{ tier3L, adminL });
@@ -440,6 +445,154 @@ public class UserActivity
 			{
 				handleParseException(ctx, e, name);
 			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addDisableServerCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "disableServer";
+		String[] aliases = new String[]
+		{ "pauseServer" };
+		String usage = prefix + name + " <-u> [<-n GuildName> or <-s SnowflakeID>]";
+		String description = ":large_orange_diamond: __VIP__: Disable a Server's access to Frame Extractions";
+		String detailedDescription = "Changes the number of extractions executed by a Server today. Useful for giving some Servers more extractions. \nUsage: `"
+				+ usage
+				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*[<-n GuildName> or <-s SnowflakeID>]* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(Option.builder("u").desc("New Daily Extraction Limit.").hasArg(false).longOpt("undo").build());
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("GuildName").desc("Name of the Guild").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
+		g1.setRequired(true);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			String[] result = assembleArguments(ctx.getArgs());
+			try
+			{
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				boolean enable = line.hasOption('u');
+				IGuild guild = parseGuild(ctx, line);
+				String newMode = enable ? ":large_blue_circle: Online" : ":red_circle: Offline";
+				String action = enable ? ":large_blue_circle: Enable" : ":red_circle: Disable";
+				//Global Change
+				if (guild != null)
+				{
+					if (confirmAction(ctx,
+							"Are you sure you want to " + action + " access to Frame Extractions for `" + ctx.getGuild().getName() + "` Server?"))
+					{
+						if (db.updateServerStanding(enable, guild.getLongID()))
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(guild.getName() + " Server is now " + newMode);
+							});
+						}
+						else
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":radioactive: No Guild was found?");
+							});
+						}
+					}
+				}
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addSetServerLimit(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "setServerLimit";
+		String[] aliases = new String[]
+		{ "modifyServerLimit", "changeServerLimit", "ssl", "msl", "csl" };
+		String usage = prefix + name + " [-u number] [<-n GuildName> or <-s SnowflakeID>]";
+		String description = ":a: __Admin__: Changes how many times a Server has extracted Frames today.";
+		String detailedDescription = "Changes the number of extractions executed by a Server today. Useful for giving some Servers more extractions. \nUsage: `"
+				+ usage
+				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*[<-n GuildName> or <-s SnowflakeID>]* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(Option.builder("l").argName("Number").desc("New Daily Extraction Limit.").hasArg().longOpt("limit").required().build());
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("GuildName").desc("Name of the Guild").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
+		g1.setRequired(true);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			String[] result = assembleArguments(ctx.getArgs());
+			try
+			{
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				try
+				{
+					int limit = Integer.parseInt(line.getOptionValue('l'));
+					IGuild guild = parseGuild(ctx, line);
+					//Global Change
+					if (guild != null)
+					{
+						int max = Integer.valueOf(prop.getProperty("MaxServerExtracts"));
+						if (limit < max)
+						{
+							if (db.updateServerDailyLimit(limit, guild.getLongID()))
+							{
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage("Today's Usage now at `" + limit + "` for " + guild.getName());
+								});
+							}
+							else
+							{
+								RequestBuffer.request(() -> {
+									ctx.getChannel().sendMessage(":radioactive: No Guild was found?");
+								});
+							}
+						}
+						else
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":no_entry_sign: Value selected is higher then the enforced max of  `" + max
+										+ "` Frames per day. Daily Limit was unchanged.");
+							});
+						}
+					}
+
+				}
+				catch (NumberFormatException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("The `-u` flag argument is not a valid integer!");
+					});
+				}
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 		registry.register(command, name, aliases);
@@ -488,7 +641,7 @@ public class UserActivity
 							else
 							{
 								RequestBuffer.request(() -> {
-									ctx.getChannel().sendMessage("User has never interacted with Frame-Summoner!");
+									ctx.getChannel().sendMessage(":radioactive: Server was not found?");
 								});
 							}
 						}
@@ -522,6 +675,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -596,6 +754,11 @@ public class UserActivity
 			{
 				handleParseException(ctx, e, name);
 			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 		registry.register(command, name, aliases);
@@ -628,7 +791,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					boolean execute = line.hasOption('e');
 					String filename = line.getOptionValue('f');
@@ -656,6 +819,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -687,6 +855,7 @@ public class UserActivity
 		OptionGroup g1 = new OptionGroup();
 		g1.addOption(Option.builder("l").desc("Shows list of literal files in the Video Directory").hasArg(false).longOpt("literal").build());
 		g1.addOption(Option.builder("r").desc("Shows list of Restricted Videos Only").hasArg(false).longOpt("restricted").build());
+		g1.setRequired(false);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
 			String[] result = assembleArguments(ctx.getArgs());
@@ -694,7 +863,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					boolean literal = line.hasOption('l');
 					boolean restrictedOnly = line.hasOption('r');
@@ -821,6 +990,11 @@ public class UserActivity
 			{
 				handleParseException(ctx, e, name);
 			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 		registry.register(command, name, aliases);
@@ -919,7 +1093,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					if (line.hasOption('s'))
 					{
@@ -929,36 +1103,45 @@ public class UserActivity
 						//Field Titles: 50
 						//Field Values: 175
 						DBGuild g = db.getServerData(ctx.getGuild().getLongID());
-						String mode = g.isBlacklistMode() ? "Blacklist" : "Whitelist";
+						String mode = g.isBlacklistMode() ? ":black_large_square: Blacklist" : ":white_large_square: Whitelist";
 						textTitle.add("Operating Mode");
-						textValue.add(g.isEnabled() ? "Online" : "Paused");
+						textValue.add(g.isEnabled() ? ":large_blue_circle: Online" : ":red_circle: Offline");
 						inline.add(true);
 						textTitle.add("Role Listing Mode");
 						textValue.add(mode);
 						inline.add(true);
 						textTitle.add("Daily Server Request Limit");
-						textValue.add(g.getRequestLimit() + " requests");
+						String max = g.getRequestLimit() == Integer.valueOf(prop.getProperty("MaxServerExtracts")) ? ":arrow_up: " : "";
+						textValue.add(max + g.getRequestLimit() + " requests");
 						inline.add(true);
 						textTitle.add("Today's Extraction Total");
-						textValue.add(g.getUsedToday() + " requests");
+						max = g.getRequestLimit() == g.getUsedToday() ? ":arrow_up: " : "";
+						textValue.add(max + g.getUsedToday() + " requests");
 						inline.add(true);
+						textTitle.add(String.valueOf('\u200B'));
+						textValue.add(String.valueOf('\u200B'));
+						inline.add(false);
 						String word = new String("");
 						for (Long l : db.getListOfAdminRoles(ctx.getGuild().getLongID()))
 						{
-							word += ctx.getGuild().getRoleByID(l).getName() + ", ";
+							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
 						}
-						word = word.length() == 0 ? "<>" : word.substring(0, word.length() - 2);
-						textTitle.add("Administrator Roles");
+						word = word.length() == 0 ? "<>" : word.substring(0, word.length() - 1);
+						textTitle.add(":a: Administrator Roles");
 						textValue.add(word);
-						inline.add(false);
+						inline.add(true);
 						word = new String("");
 						for (Long l : db.getListOfUserRoles(ctx.getGuild().getLongID()))
 						{
-							word += ctx.getGuild().getRoleByID(l).getName() + ", ";
+							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
 						}
-						word = word.length() == 0 ? "<>" : word.substring(0, word.length() - 2);
+						word = word.length() == 0 ? ("<" + ctx.getGuild().getOwner().getDisplayName(ctx.getGuild()) + ">")
+								: word.substring(0, word.length() - 1);
 						textTitle.add(mode + "ed Roles");
 						textValue.add(word);
+						inline.add(true);
+						textTitle.add(String.valueOf('\u200B'));
+						textValue.add(String.valueOf('\u200B'));
 						inline.add(false);
 						String tier3 = "";
 						String tier2 = "";
@@ -980,16 +1163,19 @@ public class UserActivity
 									break;
 							}
 						}
-						tier3 = tier3.length() == 0 ? "<>" : tier3.substring(0, tier3.length() - 1);
-						tier2 = tier2.length() == 0 ? "<>" : tier2.substring(0, tier2.length() - 1);
-						tier1 = tier1.length() == 0 ? "<>" : tier1.substring(0, tier1.length() - 1);
-						textTitle.add("Admin Channels");
+						tier3 = tier3.length() == 0 ? ":small_red_triangle_down:" : tier3.substring(0, tier3.length() - 1);
+						tier2 = tier2.length() == 0 ? ":small_red_triangle_down:" : tier2.substring(0, tier2.length() - 1);
+						tier1 = tier1.length() == 0 ? ":small_red_triangle_down:" : tier1.substring(0, tier1.length() - 1);
+						tier3 = tier3.length() >= 300 ? tier3.substring(0,297) + "..." : tier3;
+						tier2 = tier2.length() >= 300 ? tier2.substring(0,297) + "..." : tier2;
+						tier1 = tier1.length() >= 300 ? tier1.substring(0,297) + "..." : tier1;
+						textTitle.add(":a: Admin Channels");
 						textValue.add(tier3);
 						inline.add(true);
-						textTitle.add("Full Usage Channels");
+						textTitle.add(":loud_sound: Full Usage Channels");
 						textValue.add(tier2);
 						inline.add(true);
-						textTitle.add("Info Only Channels");
+						textTitle.add(":information_source: Info Only Channels");
 						textValue.add(tier1);
 						inline.add(true);
 						sendEmbedList(ctx, new Color(0, 255, 0), ctx.getGuild().getName() + " Frame-Summoner Configuration",
@@ -1021,6 +1207,11 @@ public class UserActivity
 			{
 				handleParseException(ctx, e, name);
 			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 		registry.register(command, name, aliases);
@@ -1050,7 +1241,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					IUser user = parseUser(ctx, line);
 					if (user != null)
@@ -1076,6 +1267,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -1106,7 +1302,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					IUser user = parseUser(ctx, line);
 					if (user != null)
@@ -1132,6 +1328,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -1162,7 +1363,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					IRole role = parseRole(ctx, line, false);
 					if (role != null)
@@ -1188,6 +1389,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -1218,7 +1424,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					IRole role = parseRole(ctx, line, false);
 					if (role != null)
@@ -1244,6 +1450,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -1275,7 +1486,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					IRole role = parseRole(ctx, line, false);
 					if (role != null)
@@ -1308,6 +1519,11 @@ public class UserActivity
 			{
 				handleParseException(ctx, e, name);
 			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 		registry.register(command, name, aliases);
@@ -1338,7 +1554,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					IRole role = parseRole(ctx, line, false);
 					if (role != null)
@@ -1368,6 +1584,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -1445,7 +1666,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					try
 					{
@@ -1495,6 +1716,11 @@ public class UserActivity
 			{
 				handleParseException(ctx, e, name);
 			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 
@@ -1527,7 +1753,7 @@ public class UserActivity
 			{
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 0))
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					boolean setAnnoucement = !line.hasOption('u');
 					IChannel channel = parseChannel(ctx, line, true);
@@ -1558,6 +1784,11 @@ public class UserActivity
 			catch (ParseException e)
 			{
 				handleParseException(ctx, e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -2086,14 +2317,11 @@ public class UserActivity
 				String temp = args.get(x);
 				if (temp.startsWith("\""))
 				{
-
-					do
+					while (!temp.endsWith("\""))
 					{
 						temp += " " + args.get(++x);
 					}
-					while (!temp.endsWith("\""));
 					fullArgs.add(temp);
-
 				}
 				else
 					fullArgs.add(temp);

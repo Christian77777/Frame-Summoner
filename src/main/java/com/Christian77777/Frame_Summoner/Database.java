@@ -58,7 +58,8 @@ public class Database
 			psRemoveVideo, psAddOrUpdateVideo, psGetVideoByFilename, psCheckIFVIP, psWipeAllVideos, psCountVisibleVideos, psCheckChannelTier,
 			psGetRolePerms, psCheckGuildBlacklistMode, psChangeGuildBlacklistMode, psRemoveAllUserRoles, psUpdateChannelTier,
 			psUpdateChannelAnnoucements, psGetVideoList, psSetVideoUsability, psSetVideoRestricted, psSetAllVideosRestricted, psGetUserData,
-			psRecordExtraction, psUpdateUserDailyUsage, psUpdateAllUserDailyUsage, psGetServerUsage, psUpdateServerDailyUsage, psUpdateAllServerDailyUsage;
+			psRecordExtraction, psUpdateUserDailyUsage, psUpdateAllUserDailyUsage, psGetServerUsage, psUpdateServerDailyUsage,
+			psUpdateAllServerDailyUsage, psUpdateServerDailyLimit, psUpdateServerStanding;
 
 	public static void main(String[] args) throws SQLException
 	{
@@ -365,13 +366,13 @@ public class Database
 		lock.lock();
 		try
 		{
-			if(tier > 0)//Upsert
+			if (tier > 0)//Upsert
 			{
-				
+
 			}
 			else//Delete Where
 			{
-				
+
 			}
 			psUpdateChannelTier.setInt(1, tier);
 			psUpdateChannelTier.setLong(2, channelID);
@@ -857,7 +858,7 @@ public class Database
 			}
 			else
 			{
-				if(0 >= tier)
+				if (0 >= tier)
 					result = true;
 			}
 			rs.close();
@@ -1205,7 +1206,59 @@ public class Database
 		lock.unlock();
 		return result;
 	}
+
+	/**
+	 * Modifies a Server's Daily Limit, does not check if below Hard Limit
+	 * @param newUsage the new value, to set the day's Limit to
+	 * @param guildID if supplied, restricts the change to this guildID only
+	 * @return if a guild was modified.
+	 */
+	public boolean updateServerDailyLimit(int newUsage, long guildID)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psUpdateServerDailyLimit.setInt(1, newUsage);
+			psUpdateServerDailyLimit.setLong(2, guildID);
+			psUpdateServerDailyLimit.executeUpdate();
+			if (psUpdateServerDailyLimit.getUpdateCount() > 0)
+				result = true;
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
 	
+	/**
+	 * Changes if a Server can extract frames at all.
+	 * @param toEnable If the Server should now be taken Offline
+	 * @param guildID if supplied, restricts the change to this guildID only
+	 * @return if a guild was modified.
+	 */
+	public boolean updateServerStanding(boolean toEnable, long guildID)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psUpdateServerStanding.setBoolean(1, toEnable);
+			psUpdateServerStanding.setLong(2, guildID);
+			psUpdateServerStanding.executeUpdate();
+			if (psUpdateServerStanding.getUpdateCount() > 0)
+				result = true;
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+
 	/**
 	 * Get the Channels in their permissions
 	 * @param guildID the UserID of the User
@@ -1219,7 +1272,7 @@ public class Database
 		{
 			psListOfConfiguredChannels.setLong(1, guildID);
 			ResultSet rs = psListOfConfiguredChannels.executeQuery();
-			while(rs.next())
+			while (rs.next())
 			{
 				channels.add(new DBChannel(rs.getLong(1), rs.getInt(2), rs.getBoolean(3)));
 			}
@@ -1298,38 +1351,39 @@ public class Database
 		psSetAllVideosRestricted = c.prepareStatement("UPDATE `Videos` SET `Restricted` = ?");
 		psGetUserData = c.prepareStatement("SELECT `TimesUsed`, `UsedToday`, `GlobalBan`, `VIP` FROM `UserRecord` WHERE `UserID`= ? LIMIT 1;");
 		psRecordExtraction = c.prepareStatement("INSERT INTO `ExtractionRecord` VALUES(?,?,?,?,?,?,?);");
-		psUpdateUserDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ? WHERE `UserID` = ?");
-		psUpdateAllUserDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ?");
-		psGetServerUsage = c.prepareStatement("SELECT `GuildID`, `RequestLimit`, `UsedToday`, `Enabled`, `isBlacklist` FROM `Guilds` WHERE `GuildID` = ? LIMIT 1");
-		psUpdateServerDailyUsage = c.prepareStatement("UPDATE `Guilds` SET `UsedToday` = ? WHERE `GuildID` = ?");
-		psUpdateAllServerDailyUsage = c.prepareStatement("UPDATE `Guilds` SET `UsedToday` = ?");
+		psUpdateUserDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ? WHERE `UserID` = ?;");
+		psUpdateAllUserDailyUsage = c.prepareStatement("UPDATE `UserRecord` SET `UsedToday` = ?;");
+		psGetServerUsage = c.prepareStatement(
+				"SELECT `GuildID`, `RequestLimit`, `UsedToday`, `Enabled`, `isBlacklist` FROM `Guilds` WHERE `GuildID` = ? LIMIT 1;");
+		psUpdateServerDailyUsage = c.prepareStatement("UPDATE `Guilds` SET `UsedToday` = ? WHERE `GuildID` = ?;");
+		psUpdateAllServerDailyUsage = c.prepareStatement("UPDATE `Guilds` SET `UsedToday` = ?;");
+		psUpdateServerDailyLimit = c.prepareStatement("UPDATE `Guilds` SET `RequestLimit` = ? WHERE `GuildID` = ?;");
+		psUpdateServerStanding = c.prepareStatement("UPDATE `Guilds` SET `Enabled` = ? WHERE `GuildID` = ?;");
 	}
-	
+
 	public class DBChannel
 	{
 		private long id;
 		private int tier;
 		private boolean annoucement;
-		
+
 		private DBChannel(long id, int tier, boolean annoucement)
 		{
 			this.id = id;
 			this.tier = tier;
 			this.annoucement = annoucement;
 		}
-		
+
 		public long getId()
 		{
 			return id;
 		}
 
-		
 		public int getTier()
 		{
 			return tier;
 		}
 
-		
 		public boolean isAnnoucement()
 		{
 			return annoucement;
