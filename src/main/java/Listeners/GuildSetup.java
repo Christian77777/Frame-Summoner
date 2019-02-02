@@ -58,12 +58,13 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 						db.removeChannel(storedIDs.get(x));
 						logger.debug("Channel `{}` in Guild `{}` was Deleted", storedIDs.get(x), event.getGuild().getName());
 					}
+					/*
 					if (!storedIDs.contains(actualIDs.get(x)))//Channel Added
 					{
 						db.addNewChannel(actualIDs.get(x), id, 0, false);
 						logger.debug("Channel `{}` in Guild `{}` was Added", event.getClient().getChannelByID(storedIDs.get(x)).getName(),
 								event.getGuild().getName());
-					}
+					}*/
 				}
 				//Synchronize Admin Roles
 				storedIDs = db.getListOfAdminRoles(id);
@@ -103,7 +104,7 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 				IChannel firstChannel = null;
 				for (IChannel c : channels)
 				{
-					db.addNewChannel(c.getLongID(), id, 0, false);
+					//db.addNewChannel(c.getLongID(), id, 0, false);
 					if (c.getModifiedPermissions(event.getClient().getOurUser()).contains(Permissions.SEND_MESSAGES))
 						firstChannel = c;
 				}

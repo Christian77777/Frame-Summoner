@@ -8,7 +8,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.Properties;
+import javax.script.SimpleBindings;
 import org.apache.commons.cli.AlreadySelectedException;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -36,6 +38,7 @@ import com.darichey.discord.CommandRegistry;
 import com.darichey.discord.limiter.Limiter;
 import com.darichey.discord.limiter.UserLimiter;
 import sx.blah.discord.api.IDiscordClient;
+import sx.blah.discord.api.internal.json.objects.EmbedObject;
 import sx.blah.discord.handle.impl.obj.ReactionEmoji;
 import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IGuild;
@@ -122,8 +125,6 @@ public class UserActivity
 		{ tier3L, vipL });
 		addSetServerUsage(2, new Limiter[]
 		{ tier3L, vipL });
-		addSetServerLimit(2, new Limiter[]
-		{ tier3L, vipL });
 		addDisableServerCommand(2, new Limiter[]
 		{ tier3L, vipL });
 
@@ -142,6 +143,8 @@ public class UserActivity
 		{ privateAdminL });//Allowed in PMs, Admin Check must be done in program if Private
 		addChangeChannelAnnoucementCommand(1, new Limiter[]
 		{ tier3L, adminL });
+		addSetServerLimit(1, new Limiter[]
+		{ tier3L, adminL });
 		//Extraction Commands
 		addFrameCommand(0, new Limiter[]
 		{ tier2L, listedL });
@@ -151,6 +154,8 @@ public class UserActivity
 		//Generic Commands
 		addInfoCommand(0, new Limiter[]
 		{ tier1L, listedL });
+		addGuideCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 1
+		{});
 		addHelpCommand(0, new Limiter[]
 		{ tier1L, listedL });
 	}
@@ -172,8 +177,8 @@ public class UserActivity
 		Builder b = Command.builder();
 		b.limiter(new UserLimiter(163810952905490432L));
 		Command updateDB = b.onCalled(ctx -> {
-			String command = ctx.getMessage().getFormattedContent().substring(prefix.length() + 8, ctx.getMessage().getFormattedContent().length());
-			logger.debug("SQL Command: {}", command);
+			String command = ctx.getMessage().getFormattedContent().substring(prefix.length() + 9, ctx.getMessage().getFormattedContent().length());
+			logger.debug("SQL Command: >{}", command);
 			boolean result = db.executeDebugUpdate(command);
 			String content;
 			if (result)
@@ -443,7 +448,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -507,7 +512,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -586,7 +591,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -674,7 +679,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -752,7 +757,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -818,7 +823,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -944,7 +949,7 @@ public class UserActivity
 							s.append("------------------------------------------------\n");
 							for (int x = 0; x < videos.size(); x++)
 							{
-								String vname = videos.get(x).getName();
+								String vname = videos.get(x).getNickname();
 								//Even Restricted videos will have all necessary values
 								String nextLine = "  " + String.format("%-20s", vname.trim().substring(0, Math.min(20, vname.length()))) + " | "
 										+ Extractor.convertMilliToTime(videos.get(x).getLength()).trim() + " | " + videos.get(x).getFps().trim();
@@ -988,7 +993,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1126,7 +1131,8 @@ public class UserActivity
 						{
 							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
 						}
-						word = word.length() == 0 ? "<>" : word.substring(0, word.length() - 1);
+						word = word.length() == 0 ? "<" + ctx.getGuild().getOwner().getDisplayName(ctx.getGuild()) + ">"
+								: word.substring(0, word.length() - 1);
 						textTitle.add(":a: Administrator Roles");
 						textValue.add(word);
 						inline.add(true);
@@ -1135,8 +1141,7 @@ public class UserActivity
 						{
 							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
 						}
-						word = word.length() == 0 ? ("<" + ctx.getGuild().getOwner().getDisplayName(ctx.getGuild()) + ">")
-								: word.substring(0, word.length() - 1);
+						word = word.length() == 0 ? ("<>") : word.substring(0, word.length() - 1);
 						textTitle.add(mode + "ed Roles");
 						textValue.add(word);
 						inline.add(true);
@@ -1166,9 +1171,9 @@ public class UserActivity
 						tier3 = tier3.length() == 0 ? ":small_red_triangle_down:" : tier3.substring(0, tier3.length() - 1);
 						tier2 = tier2.length() == 0 ? ":small_red_triangle_down:" : tier2.substring(0, tier2.length() - 1);
 						tier1 = tier1.length() == 0 ? ":small_red_triangle_down:" : tier1.substring(0, tier1.length() - 1);
-						tier3 = tier3.length() >= 300 ? tier3.substring(0,297) + "..." : tier3;
-						tier2 = tier2.length() >= 300 ? tier2.substring(0,297) + "..." : tier2;
-						tier1 = tier1.length() >= 300 ? tier1.substring(0,297) + "..." : tier1;
+						tier3 = tier3.length() >= 300 ? tier3.substring(0, 297) + "..." : tier3;
+						tier2 = tier2.length() >= 300 ? tier2.substring(0, 297) + "..." : tier2;
+						tier1 = tier1.length() >= 300 ? tier1.substring(0, 297) + "..." : tier1;
 						textTitle.add(":a: Admin Channels");
 						textValue.add(tier3);
 						inline.add(true);
@@ -1205,7 +1210,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1266,7 +1271,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1327,7 +1332,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1388,7 +1393,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1449,7 +1454,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1517,7 +1522,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1583,7 +1588,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1714,7 +1719,7 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1783,7 +1788,131 @@ public class UserActivity
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx, e, name);
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addGuideCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "guide";
+		String[] aliases = new String[]
+		{ "instructions" };
+		String usage = prefix + name + " <name>";
+		String description = "Display a guide on how to do something";
+		String detailedDescription = "Displays a guide on how to do something regarding Frame-Summoner?\nUsage: `" + usage
+				+ "`\n*<name>* = Name of the guide to read.";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		SimpleBindings sb = new SimpleBindings();
+		EmbedBuilder eb = new EmbedBuilder();
+		eb.withColor(new Color(0, 255, 255));
+		eb.withAuthorName("FoxTrot Fanatics");
+		eb.withAuthorUrl("https://foxtrotfanatics.info");
+		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
+		//eb.withUrl("");
+		eb.withTitle("Initalization Guide");
+		eb.withDesc("How to setup the bot to your liking in your Server");
+		//eb.withThumbnail("");
+		//eb.withImage("");
+		eb.appendField("1. Designate at least one Admin Channel", "Use `" + prefix + "cct -t 3` in a Server channel where you will continue initalization **REQUIRED**", false);
+		eb.appendField("2. Check Command Help", "Use `fs!help` in the channel above. You will be referencing it often for the rest of the guide.", false);
+		eb.appendField("3. Set Server Daily Extraction Limit", "Use `fs!ssl..` if you need to reduce usage for some reason", false);
+		eb.appendField("4. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
+		eb.appendField("5. Designate Administrator Roles", "Use `fs!aar...` to give more roles Bot Administrator permissions", false);
+		eb.appendField("6. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal users", false);
+		eb.appendField("7. Designate Channel Permissions", "Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
+		eb.appendField("Profit", ":moneybag:", false);
+		//eb.withFooterText("");
+		//eb.withFooterIcon("");
+		sb.put("init", eb.build());
+		eb = new EmbedBuilder();
+		eb.withColor(new Color(0, 255, 255));
+		eb.withAuthorName("FoxTrot Fanatics");
+		eb.withAuthorUrl("https://foxtrotfanatics.info");
+		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
+		//eb.withUrl("");
+		eb.withTitle("Frame Extraction Guide");
+		eb.withDesc("How to extract a frame from the videos correct the first time");
+		//eb.withThumbnail("");
+		//eb.withImage("");
+		eb.appendField("1. Learn more abou the Frame command", "Use `" + prefix + "help frame` in an appropriate channel.", false);
+		eb.appendField("2. Use the List command to see what is avaliable", "Use `fs!list` to get a list of videos prepared to extract", false);
+		eb.appendField("3. Figure out the timecode of the Frame", "Best thing to do is check out youtube, skip until the timecode", false);
+		eb.appendField("4. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
+		eb.appendField("5. Designate Administrator Roles", "Use `fs!aar...` to give more roles Bot Administrator permissions", false);
+		eb.appendField("6. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal users", false);
+		eb.appendField("7. Designate Channel Permissions", "Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
+		eb.appendField("Profit", ":moneybag:", false);
+		//eb.withFooterText("");
+		//eb.withFooterIcon("");
+		sb.put("frame", eb.build());
+		Command command = b.onCalled(ctx -> {
+			final IChannel location;
+			if(db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				location = ctx.getChannel();
+			else
+				location = ctx.getAuthor().getOrCreatePMChannel();
+			String[] result = assembleArguments(ctx.getArgs());
+			try
+			{
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 1 && (!extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					Object guide = sb.get(extraArgs[0]);
+					if (guide != null)
+					{
+						RequestBuffer.request(() -> {
+							location.sendMessage((EmbedObject) guide);
+						});
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							location.sendMessage(
+									":octagonal_sign: Guide was not found: `" + extraArgs[0] + "`\nDo `" + prefix + "guide` for a list of guides.");
+						});
+					}
+				}
+				else if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					StringBuilder guides = new StringBuilder("```md\n");
+					guides.append(sb.size());
+					guides.append(" Avaliable Guides\n");
+					for(Entry<String, Object> e : sb.entrySet())
+					{
+						guides.append(prefix);
+						guides.append("guide ");
+						guides.append(e.getKey());
+						guides.append(" = ");
+						guides.append(((EmbedObject)e.getValue()).title);
+					}
+					guides.append("```");
+					RequestBuffer.request(() -> {
+						location.sendMessage(guides.toString());
+					});
+				}
+				else//Too Many Arguments
+				{
+					RequestBuffer.request(() -> {
+						location.sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
+								+ name + "` for proper Usage");
+					});
+				}
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
@@ -1855,7 +1984,7 @@ public class UserActivity
 				if (longDescription == null)
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage("Unknown Command!\nUse " + prefix + "help for Command List\nUsage: **s!help** <Command Name>");
+						ctx.getChannel().sendMessage("Unknown Command!\nUse " + prefix + "help for Command List\nUsage: **" + prefix + "help** <Command Name>");
 					});
 				}
 				else
@@ -2162,7 +2291,7 @@ public class UserActivity
 		return user;
 	}
 
-	private void handleParseException(CommandContext ctx, ParseException e, String commandName)
+	private void handleParseException(IChannel ch, ParseException e, String commandName)
 	{
 		String specificError = new String("");
 		if (e instanceof MissingOptionException)
@@ -2216,7 +2345,7 @@ public class UserActivity
 		}
 		final String response = ":octagonal_sign: " + specificError + "\nDo `" + prefix + "help " + commandName + "` for proper Usage";
 		RequestBuffer.request(() -> {
-			ctx.getChannel().sendMessage(response);
+			ch.sendMessage(response);
 		});
 	}
 
