@@ -53,13 +53,13 @@ public class Database
 	private Connection c;
 	private ReentrantLock lock = new ReentrantLock();
 
-	private PreparedStatement psCheckIfGuildExists, psAddNewGuild, psRemoveGuild, psAddNewChannel, psListOfConfiguredChannels, psRemoveChannel,
-			psAddNewVIP, psRemoveVIP, psAddNewAdminRole, psListOfAdminRoles, psRemoveAdminRole, psAddNewUserRole, psListOfUserRoles, psRemoveUserRole,
+	private PreparedStatement psCheckIfGuildExists, psAddNewGuild, psRemoveGuild, psListOfConfiguredChannels, psRemoveChannel, psAddNewVIP,
+			psRemoveVIP, psAddNewAdminRole, psListOfAdminRoles, psRemoveAdminRole, psAddNewUserRole, psListOfUserRoles, psRemoveUserRole,
 			psRemoveVideo, psAddOrUpdateVideo, psGetVideoByFilename, psCheckIFVIP, psWipeAllVideos, psCountVisibleVideos, psCheckChannelTier,
 			psGetRolePerms, psCheckGuildBlacklistMode, psChangeGuildBlacklistMode, psRemoveAllUserRoles, psUpdateChannelTier,
-			psUpdateChannelAnnoucements, psGetVideoList, psSetVideoUsability, psSetVideoRestricted, psSetAllVideosRestricted, psGetUserData,
+			psSetChannelAnnoucementsTrue, psGetVideoList, psSetVideoUsability, psSetVideoRestricted, psSetAllVideosRestricted, psGetUserData,
 			psRecordExtraction, psUpdateUserDailyUsage, psUpdateAllUserDailyUsage, psGetServerUsage, psUpdateServerDailyUsage,
-			psUpdateAllServerDailyUsage, psUpdateServerDailyLimit, psUpdateServerStanding;
+			psUpdateAllServerDailyUsage, psUpdateServerDailyLimit, psUpdateServerStanding, psSetChannelAnnoucementsFalse;
 
 	public static void main(String[] args) throws SQLException
 	{
@@ -216,7 +216,7 @@ public class Database
 
 	/**
 	 * Sees if a ClientID name exists already
-	 * @param name The ClientID to verify if exists
+	 * @param filename The ClientID to verify if exists
 	 * @return if the ClientID was already entered
 	 */
 	public boolean checkIfGuildExists(long id)
@@ -298,35 +298,6 @@ public class Database
 	}
 
 	/**
-	 * Adds a Channel to the Database
-	 * @param id The Channel ID
-	 * @param guild The Guild ID, must be already in Guilds Table
-	 * @param tier The Permission Tier, [1-4]
-	 * @param annoucementChannel Occasionally use this channel for announcements
-	 * @return if the SQL executed successfully
-	 */
-	public boolean addNewChannel(long id, long guild, int tier, boolean annoucementChannel)
-	{
-		boolean result = false;
-		lock.lock();
-		try
-		{
-			psAddNewChannel.setLong(1, id);
-			psAddNewChannel.setLong(2, guild);
-			psAddNewChannel.setInt(3, tier);
-			psAddNewChannel.setBoolean(4, annoucementChannel);
-			psAddNewChannel.executeUpdate();
-			result = true;
-		}
-		catch (SQLException e)
-		{
-			logger.catching(e);
-		}
-		lock.unlock();
-		return result;
-	}
-
-	/**
 	 * Returns static ArrayList of channels stored on the server
 	 * @param guildID Restrict Channels to Guild with this ID
 	 * @return the ArrayList of channels
@@ -366,17 +337,12 @@ public class Database
 		lock.lock();
 		try
 		{
-			if (tier > 0)//Upsert
-			{
-
-			}
-			else//Delete Where
-			{
-
-			}
-			psUpdateChannelTier.setInt(1, tier);
-			psUpdateChannelTier.setLong(2, channelID);
-			psUpdateChannelTier.setLong(3, guildID);
+			psUpdateChannelTier.setLong(1, channelID);
+			psUpdateChannelTier.setLong(2, guildID);
+			psUpdateChannelTier.setInt(3, tier);
+			psUpdateChannelTier.setInt(4, tier);
+			psUpdateChannelTier.setLong(5, channelID);
+			psUpdateChannelTier.setLong(6, guildID);
 			psUpdateChannelTier.executeUpdate();
 			if (psUpdateChannelTier.getUpdateCount() > 0)
 				result = true;
@@ -390,7 +356,8 @@ public class Database
 	}
 
 	/**
-	 * Changes Channel Announcement Mode in Database, only if Channel is in appropriate Guild
+	 * Changes Channel Announcement Mode in Database, enforces channel guild relationship.
+	 * Channels that have no annoucement
 	 * @param channelID ID of Channel to modify
 	 * @param guildID Guild ID that the channel is in
 	 * @param shouldAnnouce if the channel should now be announced in.
@@ -402,12 +369,23 @@ public class Database
 		lock.lock();
 		try
 		{
-			psUpdateChannelAnnoucements.setBoolean(1, shouldAnnouce);
-			psUpdateChannelAnnoucements.setLong(2, channelID);
-			psUpdateChannelAnnoucements.setLong(3, guildID);
-			psUpdateChannelAnnoucements.executeUpdate();
-			if (psUpdateChannelAnnoucements.getUpdateCount() > 0)
-				result = true;
+			if (shouldAnnouce)
+			{
+				psSetChannelAnnoucementsTrue.setLong(1, channelID);
+				psSetChannelAnnoucementsTrue.setLong(2, guildID);
+				psSetChannelAnnoucementsTrue.setLong(3, channelID);
+				psSetChannelAnnoucementsTrue.executeUpdate();
+				if (psSetChannelAnnoucementsTrue.getUpdateCount() > 0)
+					result = true;
+			}
+			else
+			{
+				//Check if Tier > 0
+				psSetChannelAnnoucementsFalse.setLong(1, channelID);
+				psSetChannelAnnoucementsFalse.executeUpdate();
+				if (psSetChannelAnnoucementsFalse.getUpdateCount() > 0)
+					result = true;
+			}
 		}
 		catch (SQLException e)
 		{
@@ -418,7 +396,7 @@ public class Database
 	}
 
 	/**
-	 * Remove Channel in Database
+	 * Remove Channel in Database, used on boot to sync Database with Discord
 	 * @param id The Channel to Remove
 	 * @return if the SQL executed successfully
 	 */
@@ -672,35 +650,38 @@ public class Database
 	/**
 	 * Adds or updates a Database entry into videos as usable
 	 * @param filename Primary Key, name of file to add
+	 * @param nickname
 	 * @param length Length of video time
 	 * @param offset Offset to sync with external video source available, should not be null but zero
 	 * @param fps frame rate of video
 	 * @param restricted if Video should be restricted to VIP users
-	 * @return If the update was successful
+	 * @return If the video was updated/added. Will fail if a shared nickname conflicts with two different file extensions.
 	 */
-	public boolean addOrUpdateVideo(String filename, long length, long offset, String fps, Boolean restricted)
+	public boolean addOrUpdateVideo(String filename, String nickname, long length, long offset, String fps, Boolean restricted)
 	{
 		boolean result = false;
 		lock.lock();
 		try
 		{
 			psAddOrUpdateVideo.setString(1, filename);
-			psAddOrUpdateVideo.setLong(2, length);
-			psAddOrUpdateVideo.setLong(3, offset);
-			psAddOrUpdateVideo.setString(4, fps);
+			psAddOrUpdateVideo.setString(2, nickname);
+			psAddOrUpdateVideo.setLong(3, length);
+			psAddOrUpdateVideo.setLong(4, offset);
+			psAddOrUpdateVideo.setString(5, fps);
 
 			if (restricted != null)
 			{
-				psAddOrUpdateVideo.setBoolean(5, restricted);
 				psAddOrUpdateVideo.setBoolean(6, restricted);
+				psAddOrUpdateVideo.setBoolean(7, restricted);
 			}
 			else
 			{
-				psAddOrUpdateVideo.setNull(5, Types.BOOLEAN);
 				psAddOrUpdateVideo.setNull(6, Types.BOOLEAN);
+				psAddOrUpdateVideo.setNull(7, Types.BOOLEAN);
 			}
 			psAddOrUpdateVideo.executeUpdate();
-			result = true;
+			if (psAddOrUpdateVideo.getUpdateCount() > 0)
+				result = true;
 		}
 		catch (SQLException e)
 		{
@@ -787,17 +768,17 @@ public class Database
 	 * @param filename Name of File
 	 * @return Object array with the first 3 slots being String, and the last slot being a boolean
 	 */
-	public DBVideo getVideoData(String filename)
+	public DBVideo getVideoData(String nickname)
 	{
 		DBVideo result = null;
 		lock.lock();
 		try
 		{
-			psGetVideoByFilename.setString(1, filename);
+			psGetVideoByFilename.setString(1, nickname);
 			ResultSet rs = psGetVideoByFilename.executeQuery();
 			if (rs.next())//Exists at all
 			{
-				result = new DBVideo(filename, rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getBoolean(4), rs.getBoolean(5));
+				result = new DBVideo(rs.getString(1), nickname, rs.getLong(2), rs.getLong(3), rs.getString(4), rs.getBoolean(5), rs.getBoolean(6));
 			}
 			rs.close();
 		}
@@ -943,7 +924,8 @@ public class Database
 			ResultSet rs = psGetVideoList.executeQuery();
 			while (rs.next())//Exists at all
 			{
-				result.add(new DBVideo(rs.getString(1), rs.getLong(2), -1, rs.getString(3), rs.getBoolean(4), rs.getBoolean(5)));
+				result.add(new DBVideo(rs.getString(1), rs.getString(2), rs.getLong(3), rs.getLong(4), rs.getString(5), rs.getBoolean(6),
+						rs.getBoolean(7)));
 			}
 			rs.close();
 		}
@@ -1117,7 +1099,7 @@ public class Database
 		lock.lock();
 		try
 		{
-			psRecordExtraction.setLong(1, Instant.now().getEpochSecond());
+			psRecordExtraction.setLong(1, Instant.now().toEpochMilli());
 			psRecordExtraction.setLong(2, userID);
 			psRecordExtraction.setLong(3, guildID);
 			psRecordExtraction.setString(4, filename);
@@ -1232,7 +1214,7 @@ public class Database
 		lock.unlock();
 		return result;
 	}
-	
+
 	/**
 	 * Changes if a Server can extract frames at all.
 	 * @param toEnable If the Server should now be taken Offline
@@ -1300,17 +1282,22 @@ public class Database
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `Links` ( `Title` TEXT NOT NULL UNIQUE, `Link` TEXT NOT NULL, `Usable` INTEGER NOT NULL, `Filename` TEXT, PRIMARY KEY(`Title`), FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE SET NULL )");
 		stmt.executeUpdate(
-				"CREATE TABLE IF NOT EXISTS `Moments` ( `GuildID` INTEGER NOT NULL, `Name` TEXT NOT NULL, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `TimesUsed` INTEGER NOT NULL DEFAULT 1, `Disabled` INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE, FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE RESTRICT )");
+				"CREATE TABLE IF NOT EXISTS `Moments` ( `GuildID` INTEGER NOT NULL, `Name` TEXT NOT NULL, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `TimesUsed` INTEGER NOT NULL DEFAULT 1, `Disabled` INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE, FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE NO ACTION );");
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `RolePerms` ( `RoleID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `BlackVSWhite` INTEGER NOT NULL, FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE )");
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `UserRecord` ( `UserID` INTEGER NOT NULL UNIQUE, `TimesUsed` INTEGER NOT NULL, `UsedToday` INTEGER NOT NULL, `GlobalBan` INTEGER NOT NULL DEFAULT 0, `VIP` INTEGER NOT NULL, PRIMARY KEY(`UserID`) )");
 		stmt.executeUpdate(
-				"CREATE TABLE IF NOT EXISTS `Videos` ( `Filename` TEXT NOT NULL UNIQUE, `Length` INTEGER NOT NULL, `Offset` INTEGER NOT NULL, `Fps` STRING NOT NULL, `Restricted` INTEGER NOT NULL DEFAULT 0, `Usable` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`Filename`) )");
+				"CREATE TABLE IF NOT EXISTS `Videos` ( `Filename` TEXT NOT NULL UNIQUE, `Nickname` TEXT NOT NULL UNIQUE, `Length` INTEGER NOT NULL, `Offset` INTEGER NOT NULL, `Fps` STRING NOT NULL, `Restricted` INTEGER NOT NULL DEFAULT 0, `Usable` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`Filename`) )");
 		//CreateTriggers
-		stmt.executeUpdate("DROP TRIGGER IF EXISTS AutoAddExtractionRecordUser;");
 		stmt.executeUpdate(
 				"CREATE TRIGGER IF NOT EXISTS AutoAddExtractionRecordUser BEFORE INSERT ON `ExtractionRecord` BEGIN INSERT INTO UserRecord VALUES(NEW.UserID,1,1,0,0) ON CONFLICT (`UserID`) DO UPDATE SET `TimesUsed` = `TimesUsed` + 1, `UsedToday` = `UsedToday` + 1; UPDATE `Guilds` SET `UsedToday` = `UsedToday` + 1 WHERE `GuildID` = NEW.GuildID;END");
+		stmt.executeUpdate(
+				"CREATE TRIGGER IF NOT EXISTS AutoDisableDeletedVideo BEFORE DELETE ON `Videos` BEGIN UPDATE `Moments` SET `Disabled` = 1 WHERE 'Filename' = OLD.Filename; UPDATE `Links` SET `Usable` = 0 WHERE `Filename` = OLD.Filename; END");
+		stmt.executeUpdate(
+				"CREATE TRIGGER IF NOT EXISTS AutoRemoveUpdatedChannel AFTER UPDATE OF `Permission`, `Annoucements` ON `ChannelPerms` WHEN NEW.Permission = 0 AND NEW.Annoucements = 0 BEGIN DELETE FROM `ChannelPerms` WHERE `ChannelID` = NEW.ChannelID; END");
+		stmt.executeUpdate(
+				"CREATE TRIGGER IF NOT EXISTS AutoRemoveInsertedChannel AFTER INSERT ON `ChannelPerms` WHEN NEW.Permission = 0 AND NEW.Annoucements = 0 BEGIN DELETE FROM `ChannelPerms` WHERE `ChannelID` = NEW.ChannelID; END");
 	}
 
 	private void generateStatements() throws SQLException
@@ -1318,7 +1305,6 @@ public class Database
 		psCheckIfGuildExists = c.prepareStatement("SELECT EXISTS(SELECT 1 FROM `Guilds` WHERE `GuildID` = ? LIMIT 1);");
 		psAddNewGuild = c.prepareStatement("INSERT INTO `Guilds` VALUES(?,1000,0,1,1);");
 		psRemoveGuild = c.prepareStatement("DELETE FROM `Guilds` WHERE `GuildID` = ?;");
-		psAddNewChannel = c.prepareStatement("INSERT INTO `ChannelPerms` VALUES(?,?,?,?);");
 		psListOfConfiguredChannels = c.prepareStatement("SELECT `ChannelID`, `Permission`, `Annoucements` FROM `ChannelPerms` WHERE `GuildID` = ?;");
 		psRemoveChannel = c.prepareStatement("DELETE FROM `ChannelPerms` WHERE `ChannelID` = ?;");
 		psAddNewAdminRole = c.prepareStatement("INSERT INTO `AdminRoles` VALUES(?,?);");
@@ -1328,10 +1314,10 @@ public class Database
 		psListOfUserRoles = c.prepareStatement("SELECT `RoleID` FROM `RolePerms` WHERE `GuildID` = ?;");
 		psRemoveUserRole = c.prepareStatement("DELETE FROM `RolePerms` WHERE `RoleID` = ?;");
 		psAddOrUpdateVideo = c.prepareStatement(
-				"INSERT INTO `Videos` (`Filename`,`Length`,`Offset`,`Fps`,`Restricted`,`Usable`) VALUES(?,?,?,?,COALESCE(?,0),1) ON CONFLICT(`Filename`) DO UPDATE SET `Length` = excluded.`Length`, `Offset` = excluded.`Offset`, `Fps` = excluded.`Fps`, `Restricted` = COALESCE(?, excluded.`Restricted`), `Usable` = 1;");
+				"INSERT INTO `Videos` (`Filename`,`Nickname`,`Length`,`Offset`,`Fps`,`Restricted`,`Usable`) VALUES(?,?,?,?,?,COALESCE(?,0),1) ON CONFLICT(`Nickname`) DO UPDATE SET `Length` = excluded.`Length`, `Offset` = excluded.`Offset`, `Fps` = excluded.`Fps`, `Restricted` = COALESCE(?, excluded.`Restricted`), `Usable` = 1 WHERE `Filename` = excluded.`Filename`;");
 		psGetVideoByFilename = c
-				.prepareStatement("SELECT `Length`, `Offset`, `Fps`, `Restricted`, `Usable` FROM `Videos` WHERE `Filename` = ? LIMIT 1");
-		psRemoveVideo = c.prepareStatement("DELETE FROM `Videos` WHERE `Filename` = ?;");
+				.prepareStatement("SELECT `Filename`, `Length`, `Offset`, `Fps`, `Restricted`, `Usable` FROM `Videos` WHERE `Nickname` = ? LIMIT 1");
+		psRemoveVideo = c.prepareStatement("DELETE FROM `Videos` WHERE `Nickname` = ?;");
 		psCheckIFVIP = c.prepareStatement("SELECT EXISTS(SELECT 1 FROM `UserRecord` WHERE `UserID` = ? AND `VIP` = 1 LIMIT 1);");
 		psWipeAllVideos = c.prepareStatement("DELETE FROM `Videos`;");
 		psCountVisibleVideos = c.prepareStatement("SELECT COUNT(rowid) FROM `Videos` WHERE `Usable` = 1 AND `Restricted` IN (0,?);");
@@ -1343,11 +1329,15 @@ public class Database
 		psAddNewVIP = c.prepareStatement(
 				"INSERT INTO `UserRecord` (`UserID`,`TimesUsed`,`UsedToday`,`GlobalBan`,`VIP`) VALUES(?,0,0,0,1) ON CONFLICT(`UserID`) DO UPDATE SET `GlobalBan` = 0, `VIP` = 1;");
 		psRemoveVIP = c.prepareStatement("UPDATE `UserRecord` SET `VIP` = 0 WHERE `UserID` = ?;");
-		psUpdateChannelTier = c.prepareStatement("UPDATE `ChannelPerms` SET `Permission` = ? WHERE `ChannelID` = ? AND `GuildID` = ?;");
-		psUpdateChannelAnnoucements = c.prepareStatement("UPDATE `ChannelPerms` SET `Annoucements` = ? WHERE `ChannelID` = ? AND `GuildID` = ?;");
-		psGetVideoList = c.prepareStatement("SELECT `Filename`, `Length`, `Fps`, `Restricted`, `Usable` FROM `Videos` ORDER BY `Filename` ASC;");
-		psSetVideoUsability = c.prepareStatement("UPDATE `Videos` SET `Usable` = ? WHERE `Filename` = ?;");
-		psSetVideoRestricted = c.prepareStatement("UPDATE `Videos` SET `Restricted` = ? WHERE `Filename` = ?;");
+		psUpdateChannelTier = c.prepareStatement(
+				"INSERT INTO `ChannelPerms` VALUES(?, ?, ?, 0) ON CONFLICT(`ChannelID`) DO UPDATE SET `Permission` = ? WHERE `ChannelID` = ? AND `GuildID` = ?;");
+		psSetChannelAnnoucementsTrue = c.prepareStatement(
+				"INSERT INTO `ChannelPerms` VALUES(?, ?, 0, 1) ON CONFLICT(`ChannelID`) DO UPDATE SET `Annoucements` = 1 WHERE `ChannelID` = ?;");
+		psSetChannelAnnoucementsFalse = c.prepareStatement("UPDATE `ChannelPerms` SET `Annoucements` = 0 WHERE `ChannelID` = ?");
+		psGetVideoList = c.prepareStatement(
+				"SELECT `Filename`, `Nickname`, `Length`, `Offset`, `Fps`, `Restricted`, `Usable` FROM `Videos` ORDER BY `Filename` ASC;");
+		psSetVideoUsability = c.prepareStatement("UPDATE `Videos` SET `Usable` = ? WHERE `Nickname` = ?;");
+		psSetVideoRestricted = c.prepareStatement("UPDATE `Videos` SET `Restricted` = ? WHERE `Nickname` = ?;");
 		psSetAllVideosRestricted = c.prepareStatement("UPDATE `Videos` SET `Restricted` = ?");
 		psGetUserData = c.prepareStatement("SELECT `TimesUsed`, `UsedToday`, `GlobalBan`, `VIP` FROM `UserRecord` WHERE `UserID`= ? LIMIT 1;");
 		psRecordExtraction = c.prepareStatement("INSERT INTO `ExtractionRecord` VALUES(?,?,?,?,?,?,?);");
@@ -1363,6 +1353,7 @@ public class Database
 
 	public class DBChannel
 	{
+
 		private long id;
 		private int tier;
 		private boolean annoucement;
@@ -1460,16 +1451,18 @@ public class Database
 	public class DBVideo
 	{
 
-		private String name;
+		private String filename;
+		private String nickname;
 		private long length;
 		private long offset;
 		private String fps;
 		private boolean restricted;
 		private boolean usable;
 
-		private DBVideo(String n, long l, long o, String s, boolean r, boolean u)
+		private DBVideo(String f, String n, long l, long o, String s, boolean r, boolean u)
 		{
-			name = n;
+			filename = f;
+			nickname = n;
 			length = l;
 			offset = o;
 			fps = s;
@@ -1477,9 +1470,14 @@ public class Database
 			usable = u;
 		}
 
-		public String getName()
+		public String getFilename()
 		{
-			return name;
+			return filename;
+		}
+
+		public String getNickname()
+		{
+			return nickname;
 		}
 
 		public long getLength()

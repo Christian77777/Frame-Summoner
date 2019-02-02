@@ -288,16 +288,34 @@ public class Extractor
 	 * worker thread can take the request
 	 * Allows Discord Communication thread to return quickly.
 	 * @param ctx
-	 * @param filename
+	 * @param nickname
 	 * @param timecode
 	 * @param frameCount
 	 * @return
 	 */
-	public boolean requestFrame(CommandContext ctx, String filename, String timecode, Integer frameCount, boolean useOffset)
+	public boolean requestFrame(CommandContext ctx, String nickname, String timecode, Integer frameCount, boolean useOffset)
 	{
 		if (running)
 		{
-			File video = new File(prop.getProperty("Video_Directory") + File.separator + filename);
+			String directory = prop.getProperty("Video_Directory");
+			DBVideo data = db.getVideoData(nickname);
+			//Extraction cancelled if video is not even recorded at all
+			if (data == null)
+			{
+				logger.warn("Video Not Found: {}{}{}.<extension>", directory, File.separator,nickname);
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":warning: Video Not Found");
+				});
+				return false;
+			}
+			else if(!data.isUsable())
+			{
+				logger.warn("Video Not Usable: {}{}{}.<extension>", directory, File.separator,nickname);
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":warning: Video Unusable");
+				});
+				return false;
+			}
 			DBNormalUser person = db.getUserUsage(ctx.getAuthor().getLongID());
 			int maxUserExtracts = Integer.valueOf(prop.getProperty("MaxUserExtracts"));
 			boolean isVIP = person != null && (person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager")));
@@ -333,20 +351,10 @@ public class Extractor
 				});
 				return false;
 			}
-			DBVideo data = db.getVideoData(filename);
-			//Extraction cancelled if video is not even recorded at all
-			if (data == null || !data.isUsable())
-			{
-				logger.warn("Video Not Found: {}", video.getAbsolutePath());
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(":warning: Video Not Found");
-				});
-				return false;
-			}
 			//Permission denied if Video is not visible with the users current permission level
 			if (data.isRestricted() && !isVIP)
 			{
-				logger.warn("Video Not Accessible: {}", video.getAbsolutePath());
+				logger.warn("Video Not Accessible: {}{}{}", directory,File.separator,data.getFilename());
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage(":warning: Video Not Found");
 				});
@@ -364,7 +372,7 @@ public class Extractor
 				});
 				return false;
 			}
-			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), filename, timecode, frameCount)))//Add to Queue if not too full
+			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), data.getFilename(), nickname, timecode, frameCount)))//Add to Queue if not too full
 			{
 				RequestBuffer.request(() -> {
 					ctx.getMessage().addReaction(UserActivity.confirm);
@@ -400,7 +408,7 @@ public class Extractor
 			});
 			return false;
 		}
-		job.channel.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, job.filename);
+		job.channel.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, job.nickname);
 		RequestBuffer.request(() -> {
 			job.channel.sendMessage("Summoning Frame...");
 		}).get();
@@ -451,7 +459,7 @@ public class Extractor
 				IMessage message = RequestBuffer.request(() -> {
 					try
 					{
-						return job.channel.sendFile(job.author.mention() + " Frame from video " + job.filename + " at " + job.timecode, frame);
+						return job.channel.sendFile(job.author.mention() + " Frame from video " + job.nickname + " at " + job.timecode, frame);
 					}
 					catch (FileNotFoundException e)
 					{
@@ -542,6 +550,7 @@ public class Extractor
 	private boolean extractMetadata(TimestampJob job)
 	{
 		File video = new File(prop.getProperty("Video_Directory") + File.separator + job.filename);
+		String nickname = job.filename.substring(0, job.filename.lastIndexOf("."));
 		//Don't Change Presence per extraction, too likely to be rate limited.
 		/*
 		 * <frames>/<second>
@@ -586,7 +595,7 @@ public class Extractor
 				if (duration == null || fps == null)//No Video Stream Found
 				{
 					logger.warn("File `{}` has no Video Streams, hiding in Database");
-					db.setVideoUnusable(job.filename, false);
+					db.setVideoUnusable(nickname, false);
 					return false;
 				}
 				else if (duration.equals("N/A"))//Container does not support per stream durations
@@ -602,8 +611,15 @@ public class Extractor
 					logger.warn("Extra Input Found while probing {}{}{}", prop.getProperty("Video_Directory"), File.separator, job.filename);
 				}
 				long milliDuration = convertTimeToMilli(duration, null, null);
-				db.addOrUpdateVideo(job.filename, milliDuration, 0, fps, null);
-				return true;
+				if(db.addOrUpdateVideo(job.filename, nickname, milliDuration, 0, fps, null))
+				{
+					return true;
+				}
+				else
+				{
+					logger.error("Could not add File {}, conflicts with prexisting nickname {}",job.filename,nickname);
+					return false;
+				}
 			}
 			else
 			{
@@ -611,7 +627,7 @@ public class Extractor
 				RequestBuffer.request(() -> {
 					job.channel.sendMessage("Probing Failed, check Console for errors");
 				});
-				db.setVideoUnusable(job.filename, false);
+				db.setVideoUnusable(nickname, false);
 			}
 		}
 		catch (IOException e1)
@@ -620,7 +636,7 @@ public class Extractor
 			RequestBuffer.request(() -> {
 				job.channel.sendMessage("Could not start Probing Process for File: " + job.filename);
 			});
-			db.setVideoUnusable(job.filename, false);
+			db.setVideoUnusable(nickname, false);
 		}
 		return false;
 	}
@@ -699,16 +715,18 @@ public class Extractor
 		private IChannel channel;
 		private IUser author;
 		private String filename;
+		private String nickname;
 		private String timecode;
 		private Integer frameCount;
 
-		public ExtractionJob(IChannel c, IUser u, String f, String t, Integer n)
+		public ExtractionJob(IChannel ch, IUser u, String f, String n, String t, Integer c)
 		{
-			channel = c;
+			channel = ch;
 			author = u;
+			nickname = n;
 			filename = f;
 			timecode = t;
-			frameCount = n;
+			frameCount = c;
 		}
 	}
 }

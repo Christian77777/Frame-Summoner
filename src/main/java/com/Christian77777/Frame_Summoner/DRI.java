@@ -43,7 +43,6 @@ import com.darichey.discord.CommandContext;
 import com.darichey.discord.CommandListener;
 import Listeners.ChannelDeleted;
 import Listeners.GuildSetup;
-import Listeners.NewChannel;
 import sx.blah.discord.api.ClientBuilder;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.api.events.IListener;
@@ -109,7 +108,6 @@ public class DRI implements IListener<ReadyEvent>
 		ClientBuilder clientBuilder = new ClientBuilder();
 		clientBuilder.withToken(prop.getProperty("Discord_Token"));
 		clientBuilder.registerListener(new GuildSetup(db, prop, prefix));
-		clientBuilder.registerListener(new NewChannel(db));
 		clientBuilder.registerListener(new ChannelDeleted(db));
 		try
 		{
