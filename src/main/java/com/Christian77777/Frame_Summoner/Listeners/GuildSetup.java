@@ -1,5 +1,5 @@
 
-package Listeners;
+package com.Christian77777.Frame_Summoner.Listeners;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -120,7 +120,7 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 							db.addNewAdminRole(r.getLongID(), id);
 							if (r.isMentionable())
 							{
-								rolecall += /* r.mention() + */", ";
+								rolecall += r.mention() + ", ";
 							}
 						}
 					}

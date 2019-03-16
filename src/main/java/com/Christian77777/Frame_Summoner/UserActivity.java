@@ -3,11 +3,26 @@ package com.Christian77777.Frame_Summoner;
 
 import java.awt.Color;
 import java.io.File;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Types;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map.Entry;
 import java.util.Properties;
 import javax.script.SimpleBindings;
@@ -21,11 +36,11 @@ import org.apache.commons.cli.OptionGroup;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.UnrecognizedOptionException;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.Christian77777.Frame_Summoner.Database.DBChannel;
 import com.Christian77777.Frame_Summoner.Database.DBGuild;
+import com.Christian77777.Frame_Summoner.Database.DBLink;
 import com.Christian77777.Frame_Summoner.Database.DBVideo;
 import com.Christian77777.Frame_Summoner.Limiters.AdminLimiter;
 import com.Christian77777.Frame_Summoner.Limiters.ListedLimiter;
@@ -43,9 +58,12 @@ import sx.blah.discord.handle.impl.obj.ReactionEmoji;
 import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IGuild;
 import sx.blah.discord.handle.obj.IMessage;
+import sx.blah.discord.handle.obj.IMessage.Attachment;
 import sx.blah.discord.handle.obj.IRole;
 import sx.blah.discord.handle.obj.IUser;
+import sx.blah.discord.handle.obj.Permissions;
 import sx.blah.discord.util.EmbedBuilder;
+import sx.blah.discord.util.MessageHistory;
 import sx.blah.discord.util.RequestBuffer;
 
 /**
@@ -72,6 +90,8 @@ public class UserActivity
 	private ArrayList<CommandWrapper> commands = new ArrayList<CommandWrapper>();
 	private final String prefix;
 	public static ReactionEmoji confirm = ReactionEmoji.of(new String(Character.toChars(9989)));
+	public static ReactionEmoji ok = ReactionEmoji.of(new String(Character.toChars(127383)));
+	public static ReactionEmoji begin = ReactionEmoji.of(new String(Character.toChars(10035)));
 	public static ReactionEmoji deny = ReactionEmoji.of(new String(Character.toChars(10062)));
 
 	public UserActivity(DRI dri, IDiscordClient c, Database d, Properties p, String prefix)
@@ -101,10 +121,11 @@ public class UserActivity
 		AdminLimiter adminL = new AdminLimiter(db, true, false);
 		AdminLimiter privateAdminL = new AdminLimiter(db, true, true);
 		ListedLimiter listedL = new ListedLimiter(db, true);
-		//TODO Bookmark
+		//BOOKMARK Command Directory
 		//Debug Commands
 		addDebugCommand();
 		addUpdateDBCommand();
+		addTestTimecodeCommand();
 		//Operator Commands
 		addDirCommand(3, new Limiter[]
 		{ operatorL });
@@ -119,6 +140,10 @@ public class UserActivity
 		{ tier3L, vipL });
 		addVerifyCommand(2, new Limiter[]
 		{ tier3L, vipL });
+		addVerifyNewVideosCommand(2, new Limiter[]
+		{ tier3L, vipL });
+		addRemoveVideosCommand(2, new Limiter[] 
+		{ tier3L, vipL });
 		addRestrictCommand(2, new Limiter[]
 		{ tier3L, vipL });
 		addSetUserUsage(2, new Limiter[]
@@ -127,7 +152,12 @@ public class UserActivity
 		{ tier3L, vipL });
 		addDisableServerCommand(2, new Limiter[]
 		{ tier3L, vipL });
-
+		addCreateLinkCommand(2, new Limiter[]
+		{ tier3L, vipL });
+		addDeleteLinkCommand(2, new Limiter[]
+		{ tier3L, vipL });
+		addSetOffsetCommand(2, new Limiter[]
+		{ tier3L, vipL });
 		//Admin Commands
 		addNewAdminRoleCommand(1, new Limiter[]
 		{ tier3L, adminL });
@@ -151,6 +181,8 @@ public class UserActivity
 		//Query Commands
 		addListCommand(0, new Limiter[]
 		{ tier2L, listedL });
+		addFetchLinkCommand(0, new Limiter[]
+		{ tier1L, listedL });
 		//Generic Commands
 		addInfoCommand(0, new Limiter[]
 		{ tier1L, listedL });
@@ -172,6 +204,32 @@ public class UserActivity
 		registry.register(debug, "debug");
 	}
 
+	private void addTestTimecodeCommand()
+	{
+		Builder b = Command.builder();
+		Command timecode = b.onCalled(ctx -> {
+			String[] result = assembleArguments(ctx.getArgs());
+			if (result.length == 1)
+			{
+				try
+				{
+					long time = Extractor.convertTimeToMilli(result[0], null, null);
+					RequestBuffer.request(() -> {
+						ctx.getChannel()
+								.sendMessage("Timecode parsed to : `" + time + "` back into String: `" + Extractor.convertMilliToTime(time) + "`");
+					}).get();
+				}
+				catch (IllegalArgumentException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(e.getMessage());
+					}).get();
+				}
+			}
+		}).build();
+		registry.register(timecode, "tc");
+	}
+
 	private void addUpdateDBCommand()
 	{
 		Builder b = Command.builder();
@@ -190,6 +248,123 @@ public class UserActivity
 			});
 		}).build();
 		registry.register(updateDB, "updateDB");
+	}
+
+	/**
+	 * Not for Production use
+	 */
+	private void addBackupChannelCommand()
+	{
+		Builder b = Command.builder();
+		b.limiter(new UserLimiter(163810952905490432L));
+		Command backup = b.onCalled(ctx -> {
+			String channel = ctx.getChannel().getName();
+			try (Connection dbConnection = DriverManager.getConnection("jdbc:sqlite:" + DRI.dir + File.separator + "ChannelBackup.db");)
+			{
+				Statement stmt = dbConnection.createStatement();
+				ResultSet rs = stmt.executeQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';");
+				while (rs.next())
+				{
+					if (rs.getString(1).equals(channel))
+					{
+						if (confirmAction(ctx, "Duplicate Table found, do you want to overwrite it?"))
+							stmt.executeUpdate("DROP TABLE \"" + channel + "\";");
+						else
+							return;
+					}
+				}
+				Instant start = Instant.now();
+				if (ctx.getClient().getOurUser().getPermissionsForGuild(ctx.getGuild()).contains(Permissions.MANAGE_MESSAGES))
+				{
+					RequestBuffer.request(() -> {
+						ctx.getMessage().delete();
+					}).get();
+				}
+				RequestBuffer.request(() -> {
+					ctx.getChannel()
+							.sendMessage("Backing up Channel: `" + ctx.getChannel().getName() + "` in Server: `" + ctx.getGuild().getName() + "`");
+				}).get();
+				MessageHistory history = ctx.getChannel().getFullMessageHistory();
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Total of `" + history.size() + "` Messages");
+				}).get();
+				stmt.executeUpdate("CREATE TABLE \"" + channel
+						+ "\" (\"Rank\" INTEGER NOT NULL, \"CreationDate\" TEXT NOT NULL, \"AuthorName\" TEXT NOT NULL, \"AuthorID\" INTEGER NOT NULL, \"Content\"	TEXT, \"Attachments\" TEXT, PRIMARY KEY(\"Rank\"))");
+				PreparedStatement ps = dbConnection.prepareStatement("INSERT INTO \"" + channel + "\" VALUES (?,?,?,?,?,?);");
+				DateTimeFormatter formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).withLocale(Locale.US)
+						.withZone(ZoneId.systemDefault());
+				dbConnection.setAutoCommit(false);
+				int batchVarCount = 0;
+				for (int x = history.size() - 1; x >= 0; x--)
+				{
+					//Avoid Batch Var Limit of 999 in SQLite Driver
+					if (batchVarCount >= 994)
+					{
+						ps.executeBatch();
+						batchVarCount = 0;
+					}
+					IMessage m = history.get(x);
+					ps.setInt(1, history.size() - x);
+					ps.setString(2, formatter.format(m.getCreationDate()));
+					ps.setString(3, m.getAuthor().getName());
+					ps.setLong(4, m.getAuthor().getLongID());
+					String content = m.getContent();
+					System.out.println(content);
+					if (content == null || content.isEmpty())
+						ps.setNull(5, Types.VARCHAR);
+					else
+					{
+						try
+						{
+							ps.setString(5, m.getFormattedContent());
+						}
+						catch (NullPointerException e1)
+						{
+							ps.setString(5, m.getContent());
+						}
+					}
+					List<Attachment> attachmentList = m.getAttachments();
+					if (attachmentList.size() > 0)
+					{
+						String attachmentString = "";
+						for (Attachment a : attachmentList)
+						{
+							attachmentString += a.getUrl() + " ";
+						}
+						attachmentString = attachmentString.substring(0, attachmentString.length() - 1);
+						ps.setString(6, attachmentString);
+					}
+					else
+						ps.setNull(6, Types.VARCHAR);
+					ps.addBatch();
+					batchVarCount += 5;
+				}
+				if (batchVarCount > 0)
+					ps.executeBatch();
+				dbConnection.commit();
+				dbConnection.close();
+				Duration time = Duration.between(start, Instant.now());
+				String timeLength = Extractor.convertMilliToTime((time.getSeconds() * 1000) + ((long) ((time.getNano() * .000001) % 1000)));
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Backup **COMPLETE**\nTook `" + timeLength + "` long to backup");
+				}).get();
+			}
+			catch (SQLException e)
+			{
+				logger.catching(e);
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Backup **FAILED**: SQLException, check Console");
+				}).get();
+			}
+			catch (Exception e)
+			{
+				logger.catching(e);
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage("Backup **FAILED**: Generic Exception, check Console");
+				}).get();
+			}
+		}).build();
+		registry.register(backup, "backupChannelTangoContingency");
 	}
 
 	/**
@@ -265,15 +440,19 @@ public class UserActivity
 					}
 					else if (timecode == null)
 					{
-						if (!checkOffset(arg))
+						try
 						{
-							logger.error("Offset Format Invalid: {}", timecode);
+							Extractor.convertTimeToMilli(arg, null, null);
+							timecode = arg;
+						}
+						catch (IllegalArgumentException e)
+						{
+							logger.error(e);
 							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage("Offset Format invalid, must be in ##:##:##.### or ##:##:##");
+								ctx.getChannel().sendMessage(":octagonal_sign: " + e.getMessage());
 							});
 							return;
 						}
-						timecode = arg;
 					}
 					else
 					{
@@ -306,9 +485,93 @@ public class UserActivity
 		registry.register(command, name, aliases);
 	}
 
-	private void addRefreshVideosCommand(int commandTier, Limiter[] limits)
+	private void addVerifyNewVideosCommand(int commandTier, Limiter[] limits)
 	{
-
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "verifyNew";
+		String[] aliases = new String[]
+		{ "addVideos" };
+		String usage = prefix + name;
+		String description = ":large_orange_diamond: __VIP__: Scan for new video files to verify.";
+		String detailedDescription = "Scans the current Video Directory, for videos not already in the Database, to attempt verification and inclusion.\nUsage: `"
+				+ usage + "`\n:large_orange_diamond: __VIP only__\n:warning: Requires Confirmation since data will be potentially accessible.";
+		detailedDescription += appendAliases(aliases);
+		Command command = b.onCalled(ctx -> {
+			if (confirmAction(ctx, "Would you like to scan for new Videos and mark now inaccessible videos?"))
+			{
+				//Find all files not already in database, and attempt verification
+				String[] realFiles = new File(prop.getProperty("Video_Directory")).list();
+				Arrays.sort(realFiles, null);
+				ArrayList<DBVideo> cache = db.getVideoList();
+				ArrayList<DBVideo> unusable = new ArrayList<DBVideo>();
+				ArrayList<String> newFiles = new ArrayList<String>();
+				if (realFiles.length != 0 && !cache.isEmpty())
+				{
+					int lIndex = 0;
+					int rIndex = 0;
+					//Iterate through both sorted arrays for any match
+					while (cache.size() > lIndex && realFiles.length > rIndex)
+					{
+						int comparision = cache.get(lIndex).getFilename().compareTo(realFiles[rIndex]);
+						if (comparision > 0)//cache missing item from realFiles
+						{
+							newFiles.add(realFiles[rIndex]);
+							rIndex++;
+						}
+						else if (comparision < 0)//File indexed in Database now missing!
+						{
+							if (cache.get(lIndex).isUsable())
+							{
+								unusable.add(cache.get(lIndex));
+							}
+							lIndex++;
+						}
+						else
+						{
+							if(!cache.get(lIndex).isUsable())
+							{
+								newFiles.add(realFiles[rIndex]);
+							}
+							lIndex++;
+							rIndex++;
+						}
+						//else, good
+					}
+				}
+				else if (realFiles.length == 0)//Likely file path accidently modified
+					unusable = cache;
+				else//Likely Fresh Database, Database has no videos
+					unusable = null;
+				if (unusable == null)
+				{
+					logger.warn("Database is fresh and has no videos, will attempt verification on all of them");
+				}
+				else if (cache.size() == unusable.size())
+				{
+					logger.info("Database record is completely different from actual Video Directory, maybe double check the file path? \"{}\"",
+							prop.getProperty("Video_Directory"));
+					for (DBVideo s : unusable)
+					{
+						db.setVideoUnusable(s.getNickname(), false);
+					}
+				}
+				else
+				{
+					for (DBVideo s : unusable)
+					{
+						db.setVideoUnusable(s.getNickname(), false);
+					}
+				}
+				for (String filename : newFiles)
+				{
+					extractor.requestSingleVerification(ctx, filename);
+				}
+				extractor.beginVerifications(ctx.getChannel());
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
 	}
 
 	private void addFullVerificationCommand(int commandTier, Limiter[] limits)
@@ -334,7 +597,7 @@ public class UserActivity
 				});
 				return;
 			}
-			if (confirmAction(ctx, "Would you like to temporarly Disable the Extractor and begin Verification?"))
+			if (confirmAction(ctx, "Would you like to temporarly Disable the Extractor, and Authorize extraction of New Videos?"))
 				extractor.fullVerification(ctx.getChannel());
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -393,9 +656,9 @@ public class UserActivity
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord User").hasArg().longOpt("snowflake").build());
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				try
 				{
@@ -446,13 +709,21 @@ public class UserActivity
 					});
 				}
 			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: '" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
 			catch (ParseException e)
 			{
 				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -481,9 +752,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				boolean enable = line.hasOption('u');
 				IGuild guild = parseGuild(ctx, line);
@@ -510,13 +781,21 @@ public class UserActivity
 					}
 				}
 			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
 			catch (ParseException e)
 			{
 				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -545,9 +824,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				try
 				{
@@ -589,13 +868,21 @@ public class UserActivity
 					});
 				}
 			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
 			catch (ParseException e)
 			{
 				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -624,9 +911,9 @@ public class UserActivity
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				try
 				{
@@ -677,13 +964,21 @@ public class UserActivity
 					});
 				}
 			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
 			catch (ParseException e)
 			{
 				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -711,9 +1006,9 @@ public class UserActivity
 		g1.setRequired(true);
 		o.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(o, result, false);
 				boolean restrict = !line.hasOption('u');
 				if (line.hasOption('a'))
@@ -755,13 +1050,21 @@ public class UserActivity
 					});
 				}
 			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
 			catch (ParseException e)
 			{
 				handleParseException(ctx.getChannel(), e, name);
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -791,9 +1094,9 @@ public class UserActivity
 				Option.builder("e").desc("Immediately executes current verifications in the queue.").hasArg(false).longOpt("execute").build());
 		options.addOption(Option.builder("f").argName("Filename").desc("The Filename of the video.").hasArg().longOpt("file").required().build());
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -816,10 +1119,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -827,7 +1139,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -835,9 +1147,75 @@ public class UserActivity
 		registry.register(command, name, aliases);
 	}
 
-	private void addWipeDeletedVideosCommand(int commandTier, Limiter[] limits)
+	private void addRemoveVideosCommand(int commandTier, Limiter[] limits)
 	{
-
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "removeVideo";
+		String[] aliases = new String[]
+		{ "deleteVideo" };
+		String usage = prefix + name + " [-n Video Name]";
+		String description = ":large_orange_diamond: __VIP__: Completely removes a video from the Database";
+		String detailedDescription = "Removes a video from the database, and disassociates dependent data. Only way to remove unusable entries. Extraction Record is untouched.\nUsage: `"
+				+ usage
+				+ "`\n*[-n Video Name]* = Identify the Video to remove, use `fs!list` to see what can be removed\n:large_orange_diamond: __VIP only__\n:warning: Requires Confirmation since data will be potentially removed.";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(
+				Option.builder("n").argName("VideoName").desc("Name of Video to Remove from Database").hasArg().longOpt("name").required().build());
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					if (confirmAction(ctx, "Would you like to remove the video \"" + line.getOptionValue('n') + "\" if it exists?"))
+					{
+						if (db.removeVideo(line.getOptionValue("n")))
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":eject: Video was Removed");
+							});
+						}
+						else
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":warning: Video was not found");
+							});
+						}
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
 	}
 
 	/**
@@ -863,9 +1241,9 @@ public class UserActivity
 		g1.setRequired(false);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -942,24 +1320,49 @@ public class UserActivity
 								}
 							}
 							StringBuilder s = new StringBuilder("```md\n");
-							if (line.hasOption('r'))
-								s.append(String.format("%3d", videos.size()) + " Restricted Videos  | Duration     | FPS\n");
-							else
-								s.append(String.format("%3d", videos.size()) + " Accessible Videos  | Duration     | FPS\n");
-							s.append("------------------------------------------------\n");
+							s.append(String.format("%4d", videos.size()) + " " + (line.hasOption('r') ? "Restricted" : "Accessible")
+									+ " Videos  | Duration     | Linked | FPS\n");
+							s.append("------------------------------------------------------------\n");
 							for (int x = 0; x < videos.size(); x++)
 							{
-								String vname = videos.get(x).getNickname();
-								//Even Restricted videos will have all necessary values
-								String nextLine = "  " + String.format("%-20s", vname.trim().substring(0, Math.min(20, vname.length()))) + " | "
-										+ Extractor.convertMilliToTime(videos.get(x).getLength()).trim() + " | " + videos.get(x).getFps().trim();
-								if (videos.get(x).isRestricted())
-									nextLine = "< " + nextLine.substring(2) + " >";
-								else if (!videos.get(x).isUsable())
-									nextLine = "> " + nextLine.substring(2);
+								DBVideo v = videos.get(x);
+								StringBuilder entry = new StringBuilder();
+								if (!v.isUsable())
+									entry.append(" * ");
+								else if (v.isRestricted())
+									entry.append(" < ");
+								else
+									entry.append(" | ");
+								entry.append(String.format("%-20s", v.getNickname().trim().substring(0, Math.min(20, v.getNickname().length()))));
+								entry.append(" | ");
+								entry.append(Extractor.convertMilliToTime(v.getLength()));
+								if (!v.isUsable())
+									entry.append(" * ");
+								else if (v.isRestricted())
+									entry.append(" > ");
+								else
+									entry.append(" | ");
+								if (v.isLinked())
+									entry.append("<Link>");
+								else
+									entry.append("------");
+								if (!v.isUsable())
+									entry.append(" * ");
+								else if (v.isRestricted())
+									entry.append(" < ");
+								else
+									entry.append(" | ");
+								entry.append(String.format("%-4s", v.getFps()));
+								if (!v.isUsable())
+									entry.append(" * ");
+								else if (v.isRestricted())
+									entry.append(" > ");
+								else
+									entry.append(" | ");
+								String nextLine = entry.toString();
 								if ((s.length() + nextLine.length()) >= 1996)
 								{
-									//Send in Chunks
+									//Send in Chunks to avoid 2000 char limit
 									s.append("```");
 									final String stringPart = s.toString();
 									RequestBuffer.request(() -> {
@@ -986,10 +1389,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -997,7 +1409,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1050,7 +1462,7 @@ public class UserActivity
 						ctx.getChannel().sendMessage("File Path: `" + path2 + "`\nSaved to values.txt");
 					});
 					logger.info("Edited values.txt, now rebooting");
-					DRI.menu.manualRestart(500);
+					DRI.menu.restartUI();
 				}
 				else
 				{
@@ -1093,9 +1505,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1203,10 +1615,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1214,7 +1635,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1241,9 +1662,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1264,10 +1685,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1275,7 +1705,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1302,9 +1732,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1325,10 +1755,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1336,7 +1775,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1363,9 +1802,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1386,10 +1825,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1397,7 +1845,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1424,9 +1872,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1447,10 +1895,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1458,7 +1915,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1486,9 +1943,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1515,10 +1972,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1526,7 +1992,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1554,9 +2020,9 @@ public class UserActivity
 		g1.setRequired(true);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
+				String[] result = assembleArguments(ctx.getArgs());
 				CommandLine line = new DefaultParser().parse(options, result, false);
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
@@ -1581,10 +2047,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1592,7 +2067,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1666,6 +2141,539 @@ public class UserActivity
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Channel").hasArg().longOpt("snowflake").build());
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					try
+					{
+						int tier = Integer.parseInt(line.getOptionValue('t'));
+						if (tier >= 0 && tier <= 3)
+						{
+							IChannel channel = parseChannel(ctx, line, true);
+							if (channel != null)
+							{
+								if (db.updateChannelTier(channel.getLongID(), channel.getGuild().getLongID(), tier))
+								{
+									RequestBuffer.request(() -> {
+										ctx.getChannel().sendMessage("Tier Updated");
+									});
+								}
+								else//Should already be guaranteed not to happen in parseChannel()
+								{
+									RequestBuffer.request(() -> {
+										ctx.getChannel().sendMessage(":radioactive: no channel was updated?");
+									});
+								}
+							}
+						}
+						else
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":no_entry_sign: The `-t` flag argument is not valid! `0 <= tier <= 3`");
+							});
+						}
+					}
+					catch (NumberFormatException e)
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(":no_entry_sign: The `-t` flag argument is not a valid integer!");
+						});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+
+		registry.register(command, name, aliases);
+	}
+
+	private void addChangeChannelAnnoucementCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "changeChannelAnnoucement";
+		String[] aliases = new String[]
+		{ "cca", "updateChannelAnnoucement", "uca" };
+		String usage = prefix + name + " <-u> <<-n ChannelName> or <-s SnowflakeID>>";
+		String description = ":a: __Admin__: Designate channel as Annoucement Channel.";
+		String detailedDescription = "Toggle channel as annoucement channel. These channels might get impromptu messages regarding the bot specific to the Server or Global\nUsage: `"
+				+ usage
+				+ "`\n*<-u>* = Changes command to unset annoucement status\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 389021830`\n:a: __Admin only__\n - true or false can be substituted by `y` and `n` or `1` and `0`";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(Option.builder("u").desc("Channel Permission Tier [0-3]").hasArg(false).longOpt("undo").build());
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("Channel Name").desc("Discord Channel Name").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Channel").hasArg().longOpt("snowflake").build());
+		g1.setRequired(false);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					boolean setAnnoucement = !line.hasOption('u');
+					IChannel channel = parseChannel(ctx, line, true);
+					if (channel != null)
+					{
+						if (db.updateChannelAnnoucement(channel.getLongID(), channel.getGuild().getLongID(), setAnnoucement))
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage("Channel Updated");
+							});
+						}
+						else//Should already be guaranteed not to happen in parseChannel()
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":radioactive: Channel not already in Database?");
+							});
+						}
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addCreateLinkCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "createLink";
+		String[] aliases = new String[]
+		{};
+		String usage = prefix + name + " [-l Link] <-n Video Name> [-e Episode Name] <-d Description>";
+		String description = ":large_orange_diamond: __VIP__: Create's a fetchable link to a YouTube video.";
+		String detailedDescription = "Stores a link to a YouTube video, likely mirrored as a local file prepared for Frame Extraction.\nUsage: `"
+				+ usage
+				+ "`\n*[-l Link]* = Youtube Link to serve on request.\n*[-e Episode Name]* = Video to associate with the Link. Example `-n EP01`\n*<-e Episode Name>* = Episode name to associate with the link\n*<-d Description>* = 480 character Description to associate with the Link and Episode name\n - Already Stored linked will be replaced if duplicated";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(
+				Option.builder("l").argName("Youtube Link").desc("Link of the Corrisponding video").hasArg().required().longOpt("link").build());
+		options.addOption(Option.builder("n").argName("VideoName").desc("Video in Database to associate link with").hasArg().longOpt("name").build());
+		options.addOption(Option.builder("e").argName("EpisodeName").desc("Name of the Episode from " + prop.getProperty("Content_Name")).hasArg()
+				.required().longOpt("episode").build());
+		options.addOption(Option.builder("d").argName("480char-Description").desc("Description of Episode").hasArg().longOpt("description").build());
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					String link = line.getOptionValue('l');
+					boolean validLink = false;
+					try
+					{
+						new URL(link).toURI();
+						//https://youtu.be/<code><?t=##>
+						validLink = link.substring(0, 17).equals("https://youtu.be/") ? true : false;
+					}
+					catch (MalformedURLException | URISyntaxException | IndexOutOfBoundsException e)
+					{
+						//Boolean already false
+					}
+					if (validLink)
+					{
+						if (db.createLink(link, line.getOptionValue('n'), line.getOptionValue('e'), line.getOptionValue('d')))
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage("Link Stored");
+							});
+						}
+						else
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":radioactive: SQLExecption, could not store link");
+							});
+						}
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(":octagonal_sign: Invalid youtu.be link provided!: `" + link + "`");
+						});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addFetchLinkCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "link";
+		String[] aliases = new String[]
+		{ "l" };
+		String usage = prefix + name + " [<-n Video Name> or <-e Episode Name>] <-t start time>";
+		String description = "Links to a YouTube video.";
+		String detailedDescription = "Posts a link to a YouTube video, likely mirrored as a local file ripe for Frame Extraction.\nUsage: `" + usage
+				+ "`\n*[<-n Video Name> or <-e Episode Name>]* = Identify the Link to be retrieved by Video Name or Episode Name as declared by flag. Example `-n EP01` or `-e Teddygozilla`\n*<-t timecode>* = Seek to a certain time code in the Video automatically";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(
+				Option.builder("t").argName("<##:><##:><#>#<.###>").desc("Timecode to seek to in the video.").hasArg().longOpt("timecode").build());
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("VideoName").desc("Searches for Link in Database by Video name").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("e").argName("EpisodeName").desc("Name of the Episode from " + prop.getProperty("Content_Name")).hasArg()
+				.longOpt("episode").build());
+		g1.setRequired(true);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				long time = 0;
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					if (line.hasOption('t'))
+					{
+						try
+						{
+							time = Extractor.convertTimeToMilli(line.getOptionValue('t'), null, null);
+						}
+						catch (IllegalArgumentException e)
+						{
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":warning: " + e.getMessage());
+							});
+						}
+					}
+					ArrayList<DBLink> links = null;
+					boolean isVIP = VIPLimiter.checkOperator(prop, ctx.getAuthor().getLongID()) || db.isUserVIP(ctx.getAuthor().getLongID());
+					if (line.hasOption('n'))
+						links = db.getLink(line.getOptionValue('n'), false, isVIP);
+					else
+						links = db.getLink(line.getOptionValue('e'), true, isVIP);
+					if (links.size() > 0)
+					{
+						if (links.size() == 1)
+						{
+							DBLink data = links.get(0);
+							String linkText = data.getLink() + (line.hasOption('t') ? "?t=" + (time / 1000) : "");
+							EmbedBuilder embed = new EmbedBuilder();
+							embed.withAuthorName("FoxTrot Fanatics");
+							embed.withAuthorUrl("https://foxtrotfanatics.info");
+							embed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
+							embed.withTitle(data.getTitle());
+							if (data.getDescription() != null)
+								embed.withDesc(data.getDescription());
+							embed.withUrl(linkText);
+							embed.withColor(new Color(255, 0, 0));
+							if (data.getNickname() != null)
+								embed.appendField("Video File", data.getNickname(), true);
+							if (line.hasOption('t'))
+								embed.appendField("Start Time", Extractor.convertMilliToTime(time), true);
+							embed.withFooterIcon(ctx.getAuthor().getAvatarURL());
+							embed.withFooterText("Requested By: \"" + ctx.getAuthor().getDisplayName(ctx.getGuild()) + "\"");
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(embed.build());
+							}).get();
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(linkText);
+							}).get();
+						}
+						else
+						{
+							String tmp = "Found Multiple Videos\n---------------------------------------------------------------------\n";
+							for (DBLink s : links)
+							{
+								tmp += "<" + s.getLink() + (line.hasOption('t') ? "?t=" + (time / 1000) : "") + "> - " + s.getTitle() + "\n";
+							}
+							final String linkText = tmp;
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(linkText);
+							});
+						}
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(":warning: No Link Found!");
+						});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addDeleteLinkCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "deleteLink";
+		String[] aliases = new String[]
+		{};
+		String usage = prefix + name + " [-l Link] [-n Video Name] [-e Episode Name]";
+		String description = ":large_orange_diamond: __VIP__: Delete link to a YouTube video.";
+		String detailedDescription = "Deletes a link from the Database.\nUsage: `" + usage
+				+ "`\n*[-l Link]* = Youtube Link in Database.\n*[-n Video Name]* = Video Name to remove from Database. Example `-n EP01`\n*<-e Episode Name>* = Episode name to remove from Database\n";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("l").argName("Youtube Link").desc("Link of the Corrisponding video").hasArg().longOpt("link").build());
+		g1.addOption(Option.builder("n").argName("VideoName").desc("Video in Database to associate link with").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("e").argName("EpisodeName").desc("Name of the Episode from " + prop.getProperty("Content_Name")).hasArg()
+				.longOpt("episode").build());
+		g1.setRequired(true);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			String[] result = assembleArguments(ctx.getArgs());
+			try
+			{
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					if (db.deleteLink(line.getOptionValue('l'), line.getOptionValue('n'), line.getOptionValue('e')))
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Link Removed");
+						});
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Could not find reference to Link");
+						});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addSetOffsetCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "setOffset";
+		String[] aliases = new String[]
+		{ "updateOffset", "so" };
+		String usage = prefix + name + " [-n Video Name] [-o Offset]";
+		String description = ":large_orange_diamond: __VIP__: Add default offset to video";
+		String detailedDescription = "Adds a default offset to a Video file for every normal extraction. Used to sync local video with an external source. Can be bypassed with a -o flag in the Frame command.\nUsage: `"
+				+ usage + "`\n*[-n Video Name]* = Video file in Database to modify.\n*[-o Offset]* = Timecode offset to add to video";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(Option.builder("o").argName("##:##:##.###").desc("Timecode to stand for length of time").hasArg().longOpt("offset")
+				.required().build());
+		options.addOption(Option.builder("n").argName("VideoName").desc("Video in Database to modify").hasArg().longOpt("name").required().build());
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					if (db.updateVideoOffset(line.getOptionValue('n'),
+							Long.valueOf(Extractor.convertTimeToMilli(line.getOptionValue('o'), null, null))))
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage("Video Updated");
+						});
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(":warning: No Video found");
+						});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addExamineExtractionCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "examineRecord";
+		String[] aliases = new String[]
+		{ "er" };
+		String usage = prefix + name;
+		String description = ":large_orange_diamond: __VIP__: Exports an Excel spreadsheet of the Extraction Record.";
+		String detailedDescription = "Changes the types of commands allowed in a Channel of a Server.\nUsage: `" + usage
+				+ "`\n*[-t Tier (0-3)]* = The new Permission Tier, higher tiers allow the commands of the previous tier\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 389021830`\n:a: __Admin only__\n - Allowed in PM's to prevent lockout, but channel must be specified\n - Tier 0 = Complete Silence\n - Tier 1 = Basic Information Commands\n - Tier 2 = Normal usage\n - Tier 3 = Admin commands";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(Option.builder("t").argName("Number").desc("Channel Permission Tier [0-3]").hasArg().longOpt("tier").required().build());
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("Channel Name").desc("Discord Channel Name").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Channel").hasArg().longOpt("snowflake").build());
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
 			String[] result = assembleArguments(ctx.getArgs());
 			try
 			{
@@ -1712,10 +2720,19 @@ public class UserActivity
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1723,76 +2740,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
-				logger.error(errorMessage, e);
-			}
-		}).build();
-		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
-
-		registry.register(command, name, aliases);
-	}
-
-	private void addChangeChannelAnnoucementCommand(int commandTier, Limiter[] limits)
-	{
-		Builder b = Command.builder();
-		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
-		String name = "changeChannelAnnoucement";
-		String[] aliases = new String[]
-		{ "cca", "updateChannelAnnoucement", "uca" };
-		String usage = prefix + name + " <-u> <<-n ChannelName> or <-s SnowflakeID>>";
-		String description = ":a: __Admin__: Designate channel as Annoucement Channel.";
-		String detailedDescription = "Toggle channel as annoucement channel. These channels might get impromptu messages regarding the bot specific to the Server or Global\nUsage: `"
-				+ usage
-				+ "`\n*<-u>* = Changes command to unset annoucement status\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 389021830`\n:a: __Admin only__\n - true or false can be substituted by `y` and `n` or `1` and `0`";
-		detailedDescription += appendAliases(aliases);
-		Options options = new Options();
-		options.addOption(Option.builder("u").desc("Channel Permission Tier [0-3]").hasArg(false).longOpt("undo").build());
-		OptionGroup g1 = new OptionGroup();
-		g1.addOption(Option.builder("n").argName("Channel Name").desc("Discord Channel Name").hasArg().longOpt("name").build());
-		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Channel").hasArg().longOpt("snowflake").build());
-		g1.setRequired(true);
-		options.addOptionGroup(g1);
-		Command command = b.onCalled(ctx -> {
-			String[] result = assembleArguments(ctx.getArgs());
-			try
-			{
-				CommandLine line = new DefaultParser().parse(options, result, false);
-				String[] extraArgs = line.getArgs();
-				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
-				{
-					boolean setAnnoucement = !line.hasOption('u');
-					IChannel channel = parseChannel(ctx, line, true);
-					if (channel != null)
-					{
-						if (db.updateChannelAnnoucement(channel.getLongID(), channel.getGuild().getLongID(), setAnnoucement))
-						{
-							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage("Channel Updated");
-							});
-						}
-						else//Should already be guaranteed not to happen in parseChannel()
-						{
-							RequestBuffer.request(() -> {
-								ctx.getChannel().sendMessage(":radioactive: Channel not already in Database?");
-							});
-						}
-					}
-				}
-				else
-				{
-					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
-					});
-				}
-			}
-			catch (ParseException e)
-			{
-				handleParseException(ctx.getChannel(), e, name);
-			}
-			catch (Exception e)
-			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1822,19 +2770,22 @@ public class UserActivity
 		//eb.withUrl("");
 		eb.withTitle("Initalization Guide");
 		eb.withDesc("How to setup the bot to your liking in your Server");
-		//eb.withThumbnail("");
+		//Thumbnails content changed at runtime
 		//eb.withImage("");
-		eb.appendField("1. Designate at least one Admin Channel", "Use `" + prefix + "cct -t 3` in a Server channel where you will continue initalization **REQUIRED**", false);
-		eb.appendField("2. Check Command Help", "Use `fs!help` in the channel above. You will be referencing it often for the rest of the guide.", false);
-		eb.appendField("3. Set Server Daily Extraction Limit", "Use `fs!ssl..` if you need to reduce usage for some reason", false);
+		eb.appendField("1. Designate at least one Admin Channel",
+				"Use `" + prefix + "cct -t 3` in a Server channel where you will continue initalization **REQUIRED**", false);
+		eb.appendField("2. Check Command Help", "Use `fs!help` in the channel above. You will be referencing it often for the rest of the guide.",
+				false);
+		eb.appendField("3. Set Server Daily Extraction Limit", "Use `fs!ssl..` if you need to reduce usage server wide for some reason", false);
 		eb.appendField("4. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
-		eb.appendField("5. Designate Administrator Roles", "Use `fs!aar...` to give more roles Bot Administrator permissions", false);
-		eb.appendField("6. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal users", false);
-		eb.appendField("7. Designate Channel Permissions", "Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
+		eb.appendField("5. Designate Administrator Roles", "Use `fs!aar...` to give other Discord roles, Frame-Summoner Administrator authority",
+				false);
+		eb.appendField("6. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal Frame-Summoner usage", false);
+		eb.appendField("7. Designate Channel Permissions",
+				"Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
 		eb.appendField("Profit", ":moneybag:", false);
-		//eb.withFooterText("");
-		//eb.withFooterIcon("");
-		sb.put("init", eb.build());
+		//Footer content changed at runtime
+		sb.put("init", eb);
 		eb = new EmbedBuilder();
 		eb.withColor(new Color(0, 255, 255));
 		eb.withAuthorName("FoxTrot Fanatics");
@@ -1842,23 +2793,24 @@ public class UserActivity
 		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Frame Extraction Guide");
-		eb.withDesc("How to extract a frame from the videos correct the first time");
+		eb.withDesc("How to extract a frame from the videos correctly");
 		//eb.withThumbnail("");
 		//eb.withImage("");
 		eb.appendField("1. Learn more abou the Frame command", "Use `" + prefix + "help frame` in an appropriate channel.", false);
-		eb.appendField("2. Use the List command to see what is avaliable", "Use `fs!list` to get a list of videos prepared to extract", false);
-		eb.appendField("3. Figure out the timecode of the Frame", "Best thing to do is check out youtube, skip until the timecode", false);
-		eb.appendField("4. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
-		eb.appendField("5. Designate Administrator Roles", "Use `fs!aar...` to give more roles Bot Administrator permissions", false);
-		eb.appendField("6. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal users", false);
-		eb.appendField("7. Designate Channel Permissions", "Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
+		eb.appendField("2. Use the List command to see what is avaliable", "Use `fs!list` to get a list of videos prepared for extraction", false);
+		eb.appendField("3. Figure out the timecode of the Frame", "Best thing to do is check out youtube, skip to the frame and get the timecode",
+				false);
+		eb.appendField("4. Run an extraction", "Fill in the parameters of the command with the info you have", false);
+		eb.appendField("6. Adjust if necessary", "Extract again with the -c flag if you need to be more precise (read command details)", false);
+		eb.appendField("$. Check out Recommendations", "Use `<COMING SOON>` to see a list of approved memorable moments", false);
+		eb.appendField("!. Watch your Limit", "To prevent abuse, Extractions are limited to " + prop.getProperty("MaxUserExtracts") + "/day per User",
+				false);
 		eb.appendField("Profit", ":moneybag:", false);
-		//eb.withFooterText("");
-		//eb.withFooterIcon("");
-		sb.put("frame", eb.build());
+		//Footer Content changed at runtime
+		sb.put("frame", eb);
 		Command command = b.onCalled(ctx -> {
 			final IChannel location;
-			if(db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+			if (db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
 				location = ctx.getChannel();
 			else
 				location = ctx.getAuthor().getOrCreatePMChannel();
@@ -1872,8 +2824,12 @@ public class UserActivity
 					Object guide = sb.get(extraArgs[0]);
 					if (guide != null)
 					{
+						EmbedBuilder builder = (EmbedBuilder) guide;
+						builder.withThumbnail(ctx.getGuild().getIconURL());
+						builder.withFooterIcon(ctx.getAuthor().getAvatarURL());
+						builder.withFooterText("Requested By: \"" + ctx.getAuthor().getDisplayName(ctx.getGuild()) + "\"");
 						RequestBuffer.request(() -> {
-							location.sendMessage((EmbedObject) guide);
+							location.sendMessage(builder.build());
 						});
 					}
 					else
@@ -1889,13 +2845,14 @@ public class UserActivity
 					StringBuilder guides = new StringBuilder("```md\n");
 					guides.append(sb.size());
 					guides.append(" Avaliable Guides\n");
-					for(Entry<String, Object> e : sb.entrySet())
+					for (Entry<String, Object> e : sb.entrySet())
 					{
 						guides.append(prefix);
 						guides.append("guide ");
 						guides.append(e.getKey());
 						guides.append(" = ");
-						guides.append(((EmbedObject)e.getValue()).title);
+						guides.append(((EmbedObject) e.getValue()).title);
+						guides.append('\n');
 					}
 					guides.append("```");
 					RequestBuffer.request(() -> {
@@ -1905,10 +2862,19 @@ public class UserActivity
 				else//Too Many Arguments
 				{
 					RequestBuffer.request(() -> {
-						location.sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList() + "`\nDo `" + prefix + "help "
-								+ name + "` for proper Usage");
+						location.sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "help " + name + "` for proper Usage");
 					});
 				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
 			}
 			catch (ParseException e)
 			{
@@ -1916,7 +2882,7 @@ public class UserActivity
 			}
 			catch (Exception e)
 			{
-				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getFormattedContent();
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
 			}
 		}).build();
@@ -1961,7 +2927,7 @@ public class UserActivity
 				}
 				sendEmbedList(ctx, new Color(255, 255, 0), "Command List",
 						"All Frame-Summoner commands, avaliable to " + ctx.getAuthor().getDisplayName(ctx.getGuild()) + " [Required] <Optional>",
-						ctx.getAuthor().getAvatarURL(), textTitle, textValue, inline, null);
+						null, textTitle, textValue, inline, null);
 			}
 			else if (args.size() == 1)
 			{
@@ -1984,7 +2950,8 @@ public class UserActivity
 				if (longDescription == null)
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage("Unknown Command!\nUse " + prefix + "help for Command List\nUsage: **" + prefix + "help** <Command Name>");
+						ctx.getChannel().sendMessage(
+								"Unknown Command!\nUse " + prefix + "help for Command List\nUsage: **" + prefix + "help** <Command Name>");
 					});
 				}
 				else
@@ -2402,38 +3369,7 @@ public class UserActivity
 		}
 	}
 
-	/**
-	 * Analyze String to Update GUI border if needed
-	 * 
-	 * @param text
-	 * The text to Verify
-	 * @return if Offset Text is Acceptable
-	 */
-	public static boolean checkOffset(String text)
-	{
-		if (!text.equals("00:00:00.000"))
-		{
-			boolean wrong = true;
-			if (text.length() == 12 && StringUtils.isNumeric(text.substring(0, 2)) && text.substring(2, 3).equals(":")
-					&& StringUtils.isNumeric(text.substring(3, 5)) && text.substring(5, 6).equals(":") && StringUtils.isNumeric(text.substring(6, 8))
-					&& text.substring(8, 9).equals(".") && StringUtils.isNumeric(text.substring(9, 12)))
-			{
-				wrong = false;
-			}
-			else if (text.length() == 8 && StringUtils.isNumeric(text.substring(0, 2)) && text.substring(2, 3).equals(":")
-					&& StringUtils.isNumeric(text.substring(3, 5)) && text.substring(5, 6).equals(":") && StringUtils.isNumeric(text.substring(6, 8)))
-			{
-				wrong = false;
-			}
-			return !wrong;
-		}
-		else
-		{
-			return true;
-		}
-	}
-
-	public String[] assembleArguments(List<String> args) throws IndexOutOfBoundsException
+	public String[] assembleArguments(List<String> args) throws IllegalArgumentException
 	{
 		ArrayList<String> fullArgs = new ArrayList<String>();
 		String[] result;
@@ -2444,16 +3380,23 @@ public class UserActivity
 			for (int x = 0; x < args.size(); x++)
 			{
 				String temp = args.get(x);
-				if (temp.startsWith("\""))
+				try
 				{
-					while (!temp.endsWith("\""))
+					if (temp.startsWith("\""))
 					{
-						temp += " " + args.get(++x);
+						while (!temp.endsWith("\""))
+						{
+							temp += " " + args.get(++x);
+						}
+						fullArgs.add(temp);
 					}
-					fullArgs.add(temp);
+					else
+						fullArgs.add(temp);
 				}
-				else
-					fullArgs.add(temp);
+				catch (IndexOutOfBoundsException e)
+				{
+					throw new IllegalArgumentException(temp);
+				}
 			}
 			result = fullArgs.toArray(new String[0]);
 		}
@@ -2469,7 +3412,7 @@ public class UserActivity
 			EmbedBuilder message = new EmbedBuilder();
 			message.withAuthorName("FoxTrot Fanatics");
 			message.withAuthorUrl("https://foxtrotfanatics.info");
-			message.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
+			message.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 			message.withTitle(title);
 			message.withDesc(desc);
 			if (thumbnail != null)
@@ -2488,12 +3431,14 @@ public class UserActivity
 			}
 			if (footer == null)
 			{
-				message.withFooterText("Showing " + fieldCount + " Entries - Page " + (z + 1) + "/" + pageCount);
+				message.withFooterText("Requested By: \"" + ctx.getAuthor().getDisplayName(ctx.getGuild()) + "\" - Showing " + fieldCount
+						+ " Entries - Page " + (z + 1) + "/" + pageCount);
 			}
 			else
 			{
 				message.withFooterText(footer);
 			}
+			message.withFooterIcon(ctx.getAuthor().getAvatarURL());
 			RequestBuffer.request(() -> {
 				return ctx.getChannel().sendMessage(message.build());
 			}).get();
@@ -2531,6 +3476,11 @@ public class UserActivity
 		return tail;
 	}
 
+	public void updateProperties(Properties p)
+	{
+		prop = p;
+	}
+
 	public CommandRegistry getRegistry()
 	{
 		return registry;
@@ -2538,8 +3488,6 @@ public class UserActivity
 
 	private class CommandWrapper
 	{
-
-		private Command command;
 		private int rank;
 		private String usage;
 		private String description;
@@ -2548,7 +3496,6 @@ public class UserActivity
 
 		public CommandWrapper(Command command, int rank, String usage, String description, String detailed, String name, String[] aliases)
 		{
-			this.command = command;
 			this.rank = rank;
 			this.usage = usage;
 			this.description = description;
