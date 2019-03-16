@@ -32,22 +32,26 @@ import java.net.URL;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
-import javax.swing.ImageIcon;
-import javax.swing.JOptionPane;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.Christian77777.Frame_Summoner.Database.DBChannel;
+import com.Christian77777.Frame_Summoner.Database.DBVideo;
+import com.Christian77777.Frame_Summoner.Listeners.ChannelDeleted;
+import com.Christian77777.Frame_Summoner.Listeners.GuildSetup;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.CommandListener;
-import Listeners.ChannelDeleted;
-import Listeners.GuildSetup;
 import sx.blah.discord.api.ClientBuilder;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.ReadyEvent;
+import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.util.DiscordException;
+import sx.blah.discord.util.RequestBuffer;
 
 /**
  * @author Christian
@@ -55,12 +59,14 @@ import sx.blah.discord.util.DiscordException;
  */
 public class DRI implements IListener<ReadyEvent>
 {
+
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static final String version = new String("2.0.0b");
+	public static final String version = new String("2.0.0");
 	public static final String prefix = new String("fs!");
-	public static TrayMenu menu;
+	public static LocalInterface menu;
+	private UserActivity instructions;
 	private IDiscordClient api;
 	private CommandListener actions;
 	private Properties prop;
@@ -79,18 +85,46 @@ public class DRI implements IListener<ReadyEvent>
 			dir = temp.getAbsolutePath();
 		System.setProperty("directory", dir);
 		logger = LogManager.getLogger();
-		logger.info("Directory name found: {}", dir);
+		logger.info("Directory resolved to: {}", dir);
 		checkIfSingleInstance();
-		//Read Config and evaluate if it can continue
+		//Read Config and refresh database local data before interfacing with Discord
 		DRI controller = new DRI();
-		//Create and setup GUI menu if possible
-		TrayMenu menu = new TrayMenu(controller);
-		//Connect to Discord, Update database on changes, and establish bot commands
+		//Connect to Discord, refresh database remote data, establish bot commands, and Start UI
 		controller.connectToDiscord();
-		//Display Menu
-		menu.showMenu();
 	}
 
+	/**
+	 * Read in the Config,
+	 * Create the Frame-cache folder if necessary
+	 * Establish the Database connection
+	 * TODO Refresh Video Files
+	 * End with Terminating Connection Call
+	 */
+	public DRI()
+	{
+		readConfig();
+		File f = new File(dir + File.separator + "frame-cache");
+		if (!f.exists())
+		{
+			if (!f.mkdir())
+			{
+				logger.fatal("Could not create Frame-cache folder");
+				System.exit(4);
+			}
+		}
+		db = new Database(dir);
+		refreshVideos();
+		menu = new LocalInterface(this);
+	}
+
+	public void connectDatabase()
+	{
+		db = new Database(dir);
+	}
+
+	/**
+	 * Establish Connection to Discord and terminate thread.
+	 */
 	public void connectToDiscord()
 	{
 		if (api != null)
@@ -109,10 +143,11 @@ public class DRI implements IListener<ReadyEvent>
 		clientBuilder.withToken(prop.getProperty("Discord_Token"));
 		clientBuilder.registerListener(new GuildSetup(db, prop, prefix));
 		clientBuilder.registerListener(new ChannelDeleted(db));
+		clientBuilder.registerListener(this);
+		clientBuilder.registerListener(menu);
 		try
 		{
-			api = clientBuilder.login();
-			api.getDispatcher().registerListener(this);
+			api = clientBuilder.login();//Thread Complete, does not block
 		}
 		catch (DiscordException e)
 		{
@@ -127,10 +162,25 @@ public class DRI implements IListener<ReadyEvent>
 		Thread.currentThread().setName("DiscordConnectionThread");
 		this.api = event.getClient();
 		logger.info("Connected to Discord");
-		actions = new CommandListener(new UserActivity(this, api, db, prop, prefix).getRegistry());
+		instructions = new UserActivity(this, api, db, prop, prefix);
+		actions = new CommandListener(instructions.getRegistry());
 		api.getDispatcher().registerListener(actions);
-		//TODO Announce arrival
-		menu.setupComplete();
+	}
+
+	public void disconnect(String message)
+	{
+		for (IChannel c : getAnnoucementChannels())
+		{
+			RequestBuffer.request(() -> {
+				c.sendMessage(message);
+			});
+		}
+		api.getDispatcher().unregisterListener(actions);
+		api.logout();
+		db.closeDatabase();
+		api = null;
+		actions = null;
+		db = null;
 	}
 
 	public void editVideoDirectory(String path, boolean alertDiscord, CommandContext ctx)
@@ -140,6 +190,7 @@ public class DRI implements IListener<ReadyEvent>
 		{
 			FileOutputStream prop_file = new FileOutputStream(DRI.dir + File.separator + "config.properties");
 			prop.store(prop_file, "Frame-Summoner Properties");
+			instructions.updateProperties(prop);
 		}
 		catch (IOException e)
 		{
@@ -148,26 +199,86 @@ public class DRI implements IListener<ReadyEvent>
 		}
 	}
 
+	/**
+	 * If video removed, mark as unusable
+	 * If new video found, ignore, require manual addition.
+	 * Just remark its existance in the console.
+	 */
 	public void refreshVideos()
 	{
-		
+		String[] realFiles = new File(prop.getProperty("Video_Directory")).list();
+		Arrays.sort(realFiles, null);
+		ArrayList<DBVideo> cache = db.getVideoList();
+		ArrayList<DBVideo> unusable = new ArrayList<DBVideo>();
+		ArrayList<String> newFiles = new ArrayList<String>();
+		if (realFiles.length != 0 && !cache.isEmpty())
+		{
+			int lIndex = 0;
+			int rIndex = 0;
+			//Iterate through both sorted arrays for any match
+			while (cache.size() > lIndex && realFiles.length > rIndex)
+			{
+				int comparision = cache.get(lIndex).getFilename().compareTo(realFiles[rIndex]);
+				if (comparision > 0)//cache missing item from realFiles
+				{
+					newFiles.add(realFiles[rIndex]);
+					rIndex++;
+				}
+				else if (comparision < 0)//File indexed in Database now missing!
+				{
+					if (cache.get(lIndex).isUsable())
+					{
+						unusable.add(cache.get(lIndex));
+					}
+					lIndex++;
+				}
+				else
+				{
+					rIndex++;
+					lIndex++;
+				}
+				//else, good
+			}
+		}
+		else if (realFiles.length == 0)//Likely file path accidently modified
+			unusable = cache;
+		else//Likely Fresh Database, Database has no videos
+			unusable = null;
+		if (unusable == null)
+		{
+			logger.info("Database is fresh and has no videos, make sure verify them before usage");
+		}
+		else if (cache.size() == unusable.size())
+		{
+			logger.info("Database record is completely different from actual Video Directory, maybe double check the file path? \"{}\"",
+					prop.getProperty("Video_Directory"));
+			for (DBVideo s : unusable)
+			{
+				db.setVideoUnusable(s.getNickname(), false);
+			}
+		}
+		else
+		{
+			for (DBVideo s : unusable)
+			{
+				db.setVideoUnusable(s.getNickname(), false);
+			}
+		}
+		logger.info("Lost Files: {}", Arrays.toString(unusable.toArray()));
+		logger.info("New Files Found: {}", Arrays.toString(newFiles.toArray()));
 	}
 
-	public void disconnect(String message)
+	public ArrayList<IChannel> getAnnoucementChannels()
 	{
-		//TODO Announce Disconnection, wait for extractions to complete
-		api.getDispatcher().unregisterListener(actions);
-		api.logout();
-		api = null;
-		actions = null;
-	}
-
-	public void sendMessage()
-	{
-		String s = (String) JOptionPane.showInputDialog(null, "Send Message or Command from Frame-Summoner Discord Bot", "Frame-Summoner Message",
-				JOptionPane.INFORMATION_MESSAGE, new ImageIcon(TrayMenu.image), null, null);
-		//adminChannel.sendMessage(s.substring(0, Math.min(s.length(), 2000)));
-		//TODO Announce Message
+		ArrayList<IChannel> channels = new ArrayList<IChannel>();
+		for (DBChannel c : db.getServerChannels(null))
+		{
+			if (c.isAnnoucement())
+			{
+				channels.add(api.getChannelByID(c.getId()));
+			}
+		}
+		return channels;
 	}
 
 	public void readConfig()
@@ -297,7 +408,7 @@ public class DRI implements IListener<ReadyEvent>
 				value = prop.getProperty("Video_Directory");
 				if (value != null && !new File(value).exists() && !new File(value).isDirectory())
 				{
-					logger.error("Config not properly configured, \nKey: `FFprobe_Path` is not a valid file path");
+					logger.error("Config not properly configured, \nKey: `Video_Directory` is not a valid file path");
 					readFailed = true;
 				}
 				value = prop.getProperty("AllowDirectoryChange");
@@ -324,6 +435,10 @@ public class DRI implements IListener<ReadyEvent>
 					}
 					logger.info("Frame-Summoner Properties{}", response);
 				}
+				if (instructions != null)
+				{
+					instructions.updateProperties(prop);
+				}
 			}
 			catch (IOException b)
 			{
@@ -345,24 +460,6 @@ public class DRI implements IListener<ReadyEvent>
 			logger.fatal("IOException reading default config.properties", e1);
 			System.exit(40);
 		}
-	}
-
-	public DRI()
-	{
-		readConfig();
-		File f = new File(dir + File.separator + "frame-cache");
-		if (!f.exists())
-		{
-			if (f.mkdir())
-				db = new Database(dir);
-			else
-			{
-				logger.fatal("Could not create Frame-cache folder");
-				System.exit(4);
-			}
-		}
-		else
-			db = new Database(dir);
 	}
 
 	@SuppressWarnings("resource")

@@ -1,4 +1,4 @@
-package Listeners;
+package com.Christian77777.Frame_Summoner.Listeners;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -20,7 +20,7 @@ public class ChannelDeleted implements IListener<ChannelDeleteEvent>
 	@Override
 	public void handle(ChannelDeleteEvent event)
 	{
-		logger.info("New Channel: `{}` Created in Guild `{}`",event.getChannel().getName(), event.getGuild().getName());
+		logger.info("Channel Deleted: `{}` in Guild `{}`",event.getChannel().getName(), event.getGuild().getName());
 		db.removeChannel(event.getChannel().getLongID());
 	}
 

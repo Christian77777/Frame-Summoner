@@ -1,14 +1,17 @@
 
 package com.Christian77777.Frame_Summoner;
 
+import java.awt.Color;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.Properties;
 import java.util.Queue;
@@ -20,6 +23,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.Christian77777.Frame_Summoner.Database.DBGuild;
+import com.Christian77777.Frame_Summoner.Database.DBLink;
 import com.Christian77777.Frame_Summoner.Database.DBNormalUser;
 import com.Christian77777.Frame_Summoner.Database.DBVideo;
 import com.darichey.discord.CommandContext;
@@ -29,10 +33,13 @@ import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IMessage;
 import sx.blah.discord.handle.obj.IUser;
 import sx.blah.discord.handle.obj.StatusType;
+import sx.blah.discord.util.EmbedBuilder;
+import sx.blah.discord.util.MessageBuilder;
 import sx.blah.discord.util.RequestBuffer;
 
 public class Extractor
 {
+
 	private static Logger logger = LogManager.getLogger();
 	private static final int QUEUE_LIMIT = 10;
 	private Properties prop;
@@ -145,6 +152,7 @@ public class Extractor
 	{
 		extractionThread = new Thread()
 		{
+
 			public void run()
 			{
 				logger.info("Extraction Thread Started");
@@ -178,7 +186,7 @@ public class Extractor
 					{
 						ExtractionJob job = queue.remove();
 						RequestBuffer.request(() -> {
-							job.channel.sendMessage(":no_entry: Cancelling Request, Frame Extraction was manually disabled");
+							job.message.getChannel().sendMessage(":no_entry: Cancelling Request, Frame Extraction was manually disabled");
 						});
 					}
 				}
@@ -193,6 +201,7 @@ public class Extractor
 	{
 		verificationThread = new Thread()
 		{
+
 			public void run()
 			{
 				logger.info("Video Verification Thread Started");
@@ -277,7 +286,7 @@ public class Extractor
 		else
 		{
 			RequestBuffer.request(() -> {
-				c.sendMessage("Frame-Summoner is disabled, please ensable it first!");
+				c.sendMessage("Frame-Summoner is disabled, please enable it first!");
 			});
 			return false;
 		}
@@ -302,15 +311,15 @@ public class Extractor
 			//Extraction cancelled if video is not even recorded at all
 			if (data == null)
 			{
-				logger.warn("Video Not Found: {}{}{}.<extension>", directory, File.separator,nickname);
+				logger.warn("Video Not Found: {}{}{}.<extension>", directory, File.separator, nickname);
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage(":warning: Video Not Found");
 				});
 				return false;
 			}
-			else if(!data.isUsable())
+			else if (!data.isUsable())
 			{
-				logger.warn("Video Not Usable: {}{}{}.<extension>", directory, File.separator,nickname);
+				logger.warn("Video Not Usable: {}{}{}.<extension>", directory, File.separator, nickname);
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage(":warning: Video Unusable");
 				});
@@ -318,7 +327,16 @@ public class Extractor
 			}
 			DBNormalUser person = db.getUserUsage(ctx.getAuthor().getLongID());
 			int maxUserExtracts = Integer.valueOf(prop.getProperty("MaxUserExtracts"));
-			boolean isVIP = person != null && (person.isVip() || person.getId() == Long.parseLong(prop.getProperty("Bot_Manager")));
+			boolean isVIP = (person != null && person.isVip()) || (ctx.getAuthor().getLongID() == Long.parseLong(prop.getProperty("Bot_Manager")));
+			//Permission Denied if not VIP and over the maximum number of extractions per Server
+			DBGuild g = db.getServerData(ctx.getGuild().getLongID());
+			if (!g.isEnabled() && !isVIP)
+			{
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(":red_circle: This Server is disabled from extracting Frames until it is reenabled.");
+				});
+				return false;
+			}
 			//Permission Denied if Globally banned.
 			if (person != null)
 			{
@@ -332,7 +350,7 @@ public class Extractor
 					return false;
 				}
 				//Permission Denied if not VIP and over the maximum number of extractions per User
-				if (!isVIP || person.getUsedToday() >= maxUserExtracts)
+				if (!isVIP && person.getUsedToday() >= maxUserExtracts)
 				{
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":clock3: You have reached the daily limit of `" + maxUserExtracts
@@ -341,27 +359,29 @@ public class Extractor
 					return false;
 				}
 			}
-
+			else
+				person = db.new DBNormalUser(ctx.getAuthor().getLongID());
 			//Permission Denied if not VIP and over the maximum number of extractions per Server
-			DBGuild g = db.getServerData(ctx.getGuild().getLongID());
-			if (!g.isEnabled() || (!isVIP && g.getUsedToday() >= g.getRequestLimit()))
+			if (!isVIP && g.getUsedToday() >= g.getRequestLimit())
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(":red_circle: This Server is disabled from extracting Frames until it is reenabled.");
+					ctx.getChannel().sendMessage(":red_circle: This Server has reached the daily limit of `" + g.getRequestLimit()
+							+ "` Frames per day. Reset in `" + convertMilliToTime(localSecondsUntilMidnight() * 1000) + "`");
 				});
 				return false;
 			}
 			//Permission denied if Video is not visible with the users current permission level
 			if (data.isRestricted() && !isVIP)
 			{
-				logger.warn("Video Not Accessible: {}{}{}", directory,File.separator,data.getFilename());
+				logger.warn("Video Not Accessible: {}{}{}", directory, File.separator, data.getFilename());
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage(":warning: Video Not Found");
 				});
 				return false;
 			}
 			long timestamp = convertTimeToMilli(timecode, frameCount, data.getFps());
-			if (useOffset && data.getOffset() != 0)//If Offset, and requested, add offset to timecode
+			//If Offset, and requested, add offset to timecode
+			if (useOffset && data.getOffset() != 0)
 				timestamp += data.getOffset();
 			//Compare timecode to length
 			if (data.getLength() < timestamp)
@@ -372,12 +392,19 @@ public class Extractor
 				});
 				return false;
 			}
-			if (queue.offer(new ExtractionJob(ctx.getChannel(), ctx.getAuthor(), data.getFilename(), nickname, timecode, frameCount)))//Add to Queue if not too full
+			//Recalculate timecode for -s FFMPEG flag
+			long properTimestamp = convertTimeToMilli(timecode, null, null);
+			ArrayList<DBLink> links = db.getLink(nickname, false, isVIP);
+			DBLink link = null;
+			if(!links.isEmpty())
+				link = links.get(0);
+			//Keep timecode and offset separate to obfuscate offset to users
+			if (queue.offer(new ExtractionJob(ctx.getMessage(), ctx.getAuthor(), g, person, link, data, properTimestamp, useOffset,
+					frameCount, maxUserExtracts, isVIP)))//Add to Queue if not too full
 			{
 				RequestBuffer.request(() -> {
-					ctx.getMessage().addReaction(UserActivity.confirm);
-					return 0;
-				});
+					ctx.getMessage().addReaction(UserActivity.ok);
+				}).get();
 				return true;
 			}
 			else
@@ -399,28 +426,30 @@ public class Extractor
 
 	private boolean extractFrame(ExtractionJob job)
 	{
-		File video = new File(prop.getProperty("Video_Directory") + File.separator + job.filename);
-		if (!video.exists())//If Video deleted
+		File videoFile = new File(prop.getProperty("Video_Directory") + File.separator + job.video.getFilename());
+		if (!videoFile.exists())//If Video deleted
 		{
-			logger.error("Video Not Found: {}", video.getAbsolutePath());
+			logger.error("Video Not Found: {}", videoFile.getAbsolutePath());
 			RequestBuffer.request(() -> {
-				job.channel.sendMessage("Source Video Removed!");
+				job.message.getChannel().sendMessage("Source Video Removed!");
 			});
 			return false;
 		}
-		job.channel.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, job.nickname);
+		job.message.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, job.video.getNickname());
 		RequestBuffer.request(() -> {
-			job.channel.sendMessage("Summoning Frame...");
+			job.message.addReaction(UserActivity.begin);
+			//TODO Add Reaction Instead
 		}).get();
-		String framecut = "";
+		String timecode = "";
 		if (job.frameCount != null)
 		{
-			framecut = "-filter:v \"select=gte(n\\," + job.frameCount + ")\" ";
+			timecode = "-filter:v \"select=gte(n\\," + job.frameCount + ")\" ";
 		}
+		String offsetTime = convertMilliToTime(job.timecode + (job.useOffset ? job.video.getOffset() : 0));
 		//Extraction by exact time code: ffmpeg -ss ##:##:##.### -i "C:\Path\to\Video" -t 1 -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
 		//Extraction by Timestamp and frame number in range [0,fps):ffmpeg -ss ##:##:## -i "C:\Path\to\Video" -filter:v "select=gte(n/,%%FRAMENUMBER)" -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
-		String command = "\"" + prop.getProperty("FFmpeg_Path") + "\" -loglevel quiet -y -ss " + job.timecode + " -i \"" + video.getAbsolutePath()
-				+ "\" " + framecut + "-f image2 -frames:v 1 \"" + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.filename
+		String command = "\"" + prop.getProperty("FFmpeg_Path") + "\" -loglevel quiet -y -ss " + offsetTime + " -i \"" + videoFile.getAbsolutePath()
+				+ "\" " + timecode + "-f image2 -frames:v 1 \"" + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname()
 				+ ".png\"";
 		try
 		{
@@ -441,11 +470,8 @@ public class Extractor
 					{
 						logger.warn("Terminating Extraction Forcibly");
 						RequestBuffer.request(() -> {
-							job.channel.sendMessage(":no_entry: Terminating Request, Frame Extraction was manually disabled");
+							job.message.getChannel().sendMessage(":no_entry: Terminating Request, Frame Extraction was manually disabled");
 						});
-						File frame = new File(DRI.dir + File.separator + "frame-" + job.filename + ".png");
-						if (frame.exists())
-							frame.delete();
 						return false;
 					}
 					waiting = true;
@@ -454,41 +480,85 @@ public class Extractor
 			while (waiting);
 			if (exitValue == 0)
 			{
+				long completionTimestamp = Instant.now().toEpochMilli();
 				logger.info("Process Completed");
-				File frame = new File(DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.filename + ".png");
-				IMessage message = RequestBuffer.request(() -> {
-					try
-					{
-						return job.channel.sendFile(job.author.mention() + " Frame from video " + job.nickname + " at " + job.timecode, frame);
-					}
-					catch (FileNotFoundException e)
-					{
-						logger.error("File Not Found: {}", frame.getAbsolutePath());
-						logger.catching(e);
-					}
-					return null;
-				}).get();
-				if (message == null)
+				File frameFile = new File(DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname() + ".png");
+				if(frameFile.exists())
 				{
-					RequestBuffer.request(() -> {
-						job.channel.sendMessage("Frame was not Extracted!");
-					});
-					return false;
+					EmbedBuilder frameEmbed = new EmbedBuilder();
+					frameEmbed.withColor(new Color(152,146,251));
+					frameEmbed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
+					frameEmbed.withAuthorName("FoxTrot Fanatics");
+					frameEmbed.withAuthorUrl("https://foxtrotfanatics.info");
+					if(job.link != null)
+					{
+						frameEmbed.withTitle(job.link.getTitle());
+						if(job.link.getDescription() != null)
+							frameEmbed.withDesc(job.link.getDescription());
+						frameEmbed.withUrl(job.link.getLink());
+					}
+					frameEmbed.withTimestamp(job.message.getCreationDate());
+					frameEmbed.withFooterIcon(job.author.getAvatarURL());
+					frameEmbed.withFooterText("Requested By: \"" + job.author.getDisplayName(job.message.getGuild()) + "\"");
+					frameEmbed.appendField("Video name", job.video.getNickname(), true);
+					frameEmbed.appendField("Timecode", convertMilliToTime(job.timecode), true);
+					if(job.frameCount != null)
+						frameEmbed.appendField("Frame Offset", String.valueOf(job.frameCount), true);
+					//TODO Moment Field Inline
+					frameEmbed.appendField("Accessibility", job.video.isRestricted() ? ":large_orange_diamond:" : ":arrow_forward:", false);
+					frameEmbed.withImage("attachment://" + frameFile.getName());
+					if(job.elevated)
+					{
+						frameEmbed.appendField("User Extraction Count", (job.user.getUsedToday() + 1) + " :large_orange_diamond:", true);
+						frameEmbed.appendField("Server Extraction Count", "unaffected (" + (job.guild.getUsedToday()) + ")", true);
+					}
+					else
+					{
+						frameEmbed.appendField("User Extraction Count", (job.user.getUsedToday() + 1 >= job.maxUserCount ? ":arrow_up: " : "") + (job.user.getUsedToday() + 1) + "/" + job.maxUserCount, true);
+						frameEmbed.appendField("Server Extraction Count", (job.guild.getUsedToday() + 1 >= job.guild.getRequestLimit() ? ":arrow_up: " : "") + (job.guild.getUsedToday() + 1) + "/" + job.guild.getRequestLimit(), true);
+					}
+					IMessage message = RequestBuffer.request(() -> {
+						try
+						{
+							MessageBuilder b = new MessageBuilder(client);
+							b.withChannel(job.message.getChannel());
+							b.withContent(job.author.mention());
+							b.withFile(frameFile);
+							b.withEmbed(frameEmbed.build());
+							return b.build();
+						}
+						catch (FileNotFoundException e)
+						{
+							logger.error("File Not Found: {}", frameFile.getAbsolutePath());
+							logger.catching(e);
+						}
+						return null;
+					}).get();
+					if(message != null)
+					{
+						logger.info("{} Uploaded", job.video.getNickname());
+					}
+					else
+					{
+						job.message.getChannel().sendMessage("Frame was not Extracted!");
+					}
+					db.declareExtraction(completionTimestamp, job.elevated, job.author.getLongID(), job.message.getGuild().getLongID(), job.message.getChannel().getLongID(),
+							job.message.getLongID(), job.video.getFilename(), offsetTime, job.frameCount, message.getEmbeds().get(0).getImage().getUrl());
 				}
 				else
 				{
-					db.declareExtraction(job.author.getLongID(), job.channel.getGuild().getLongID(), job.filename, job.timecode, job.frameCount,
-							message.getAttachments().get(0).getUrl());
-
+					RequestBuffer.request(() -> {
+						job.message.getChannel().sendMessage("Frame was not Extracted!");
+					});
+					return false;
 				}
-				logger.info("{} Uploaded", job.filename);
 				return true;
 			}
 			else
 			{
 				logger.error("Process Failed, Error: {}", exitValue);
 				RequestBuffer.request(() -> {
-					job.channel.sendMessage(":no_entry_sign: Extraction Failed, check Console for errors");
+					job.message.getChannel().sendMessage(":no_entry_sign: Extraction Failed, check Console for errors");
 				});
 				return false;
 			}
@@ -497,7 +567,7 @@ public class Extractor
 		{
 			logger.catching(e1);
 			RequestBuffer.request(() -> {
-				job.channel.sendMessage(":radioactive: Could not start Process.");
+				job.message.getChannel().sendMessage(":radioactive: Could not start Process.");
 			});
 			return false;
 		}
@@ -520,7 +590,7 @@ public class Extractor
 			if (verifications.offer(new TimestampJob(ctx.getChannel(), filename)))
 			{
 				RequestBuffer.request(() -> {
-					ctx.getMessage().addReaction(UserActivity.confirm);
+					ctx.getMessage().addReaction(UserActivity.ok);
 					return 0;
 				});
 				return true;
@@ -528,7 +598,7 @@ public class Extractor
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Overloaded with requests, please try again later");
+					ctx.getChannel().sendMessage(":radioactive: Verification Request Buffer maxed");
 				});
 				return false;
 			}
@@ -611,13 +681,13 @@ public class Extractor
 					logger.warn("Extra Input Found while probing {}{}{}", prop.getProperty("Video_Directory"), File.separator, job.filename);
 				}
 				long milliDuration = convertTimeToMilli(duration, null, null);
-				if(db.addOrUpdateVideo(job.filename, nickname, milliDuration, 0, fps, null))
+				if (db.addOrUpdateVideo(job.filename, nickname, milliDuration, 0, fps, null))
 				{
 					return true;
 				}
 				else
 				{
-					logger.error("Could not add File {}, conflicts with prexisting nickname {}",job.filename,nickname);
+					logger.error("Could not add File {}, conflicts with prexisting nickname {}", job.filename, nickname);
 					return false;
 				}
 			}
@@ -643,30 +713,111 @@ public class Extractor
 
 	public static String convertMilliToTime(long time)
 	{
-		String hours = String.format("%02d", (time / (1000 * 60 * 60)) % 24);
+		boolean wasNegative = false;
+		if (time < 0)
+		{
+			wasNegative = true;
+			time = -time;
+		}
+		String hours = String.format("%02d", (time / (1000 * 60 * 60)));
 		String minutes = String.format("%02d", (time / (1000 * 60)) % 60);
 		String seconds = String.format("%02d", (time / 1000) % 60);
 		String milli = String.format("%03d", time % 1000);
-		return hours + ":" + minutes + ":" + seconds + "." + milli;
+		String negative = "";
+		if (wasNegative)
+		{
+			negative = "-";
+		}
+		return negative + hours + ":" + minutes + ":" + seconds + "." + milli;
 	}
 
-	public static long convertTimeToMilli(String time, Integer frameCount, String framerate)
+	/**
+	 * Analyze String to convert to milliseconds if in this format <...###:><##:><#>#<.###>
+	 * @param text The text to Verify
+	 * @param frameCount Extra Time to add based on Framerate
+	 * @param framerate Rate of Frames to use for framecount
+	 * @return A signed long in milliseconds
+	 * @throws IllegalArgumentException If Text is improperly formatted
+	 */
+	public static long convertTimeToMilli(String text, Integer frameCount, String framerate) throws IllegalArgumentException
 	{
 		try
 		{
-			int index = time.indexOf(":");
-			long milli = Integer.valueOf(time.substring(0, index)) * 3600000;
-			milli += Integer.valueOf(time.substring(index + 1, index + 3)) * 60000;
-			milli += Integer.valueOf(time.substring(index + 4, index + 6)) * 1000;
-			if ((index = time.indexOf(".")) > 6)
-				milli += Integer.valueOf(time.substring(index + 1, Math.min(time.length(), index + 4)));
+			long timecode = 0;
+			String hoursT = "0";
+			String minutesT = "0";
+			String secondsT = "0";
+			String millisecondsT = "0";
+			int decimalIndex = text.lastIndexOf('.');
+			if (decimalIndex == -1)
+				decimalIndex = text.length();
+			int firstIndex = 0;
+			if (text.startsWith("-"))
+			{
+				firstIndex = 1;
+			}
+			secondsT = text.substring(Math.max(decimalIndex - 2, firstIndex), decimalIndex);
+			if (decimalIndex > (3 + firstIndex))
+			{
+				if (text.charAt(decimalIndex - 3) != ':')
+					throw new IllegalArgumentException("Colon Splitting Minutes with Seconds is not Present!");
+				minutesT = text.substring(Math.max(decimalIndex - 5, firstIndex), decimalIndex - 3);
+				if (decimalIndex > (6 + firstIndex))
+				{
+					if (text.charAt(decimalIndex - 6) != ':')
+						throw new IllegalArgumentException("Colon Splitting Hours with Minutes is not Present!");
+					hoursT = text.substring(firstIndex, decimalIndex - 6);
+
+				}
+			}
+			if (decimalIndex < text.length() - 1 + firstIndex)
+			{
+				millisecondsT = text.substring(decimalIndex + 1, Math.min(decimalIndex + 4, text.length()));
+			}
+			try
+			{
+				timecode += Long.parseLong(hoursT) * 3600000;
+			}
+			catch (NumberFormatException e)
+			{
+				throw new IllegalArgumentException("Hours <" + hoursT + "> contained non-numeric characters in Timecode: " + text);
+			}
+			try
+			{
+				timecode += Long.parseLong(minutesT) * 60000;
+			}
+			catch (NumberFormatException e)
+			{
+				throw new IllegalArgumentException("Minutes <" + minutesT + "> contained non-numeric characters in Timecode: " + text);
+			}
+			try
+			{
+				timecode += Long.parseLong(secondsT) * 1000;
+			}
+			catch (NumberFormatException e)
+			{
+				throw new IllegalArgumentException("Seconds <" + secondsT + "> contained non-numeric characters in Timecode: " + text);
+			}
+			try
+			{
+				timecode += Long.parseLong(millisecondsT);
+			}
+			catch (NumberFormatException e)
+			{
+				throw new IllegalArgumentException("Milliseconds <" + millisecondsT + "> contained non-numeric characters in Timecode: " + text);
+			}
 			if (framerate != null && frameCount != null)
 			{
 				double numerator = Double.valueOf(framerate.substring(0, framerate.indexOf("/")));
 				double denominator = Double.valueOf(framerate.substring(framerate.indexOf("/") + 1));
-				milli += Math.round(((numerator / denominator) * frameCount));
+				timecode += Math.round(((denominator / numerator) * frameCount * 1000));
+				//FPS = 25/1 & 25 Frames Extra -> (1/25) * 25 * 1000 = 1000 milliseconds
 			}
-			return milli;
+			if (firstIndex == 1)
+			{
+				timecode = -timecode;
+			}
+			return timecode;
 		}
 		catch (IndexOutOfBoundsException | NumberFormatException e)
 		{
@@ -700,6 +851,7 @@ public class Extractor
 
 	private class TimestampJob
 	{
+
 		private IChannel channel;
 		private String filename;
 
@@ -712,21 +864,33 @@ public class Extractor
 
 	private class ExtractionJob
 	{
-		private IChannel channel;
-		private IUser author;
-		private String filename;
-		private String nickname;
-		private String timecode;
-		private Integer frameCount;
 
-		public ExtractionJob(IChannel ch, IUser u, String f, String n, String t, Integer c)
+		private IMessage message;
+		private IUser author;
+		private DBGuild guild;
+		private DBNormalUser user;
+		private DBLink link;
+		private DBVideo video;
+		private long timecode;
+		//Offset in DBVideo
+		private boolean useOffset;
+		private Integer frameCount;
+		private int maxUserCount;
+		private boolean elevated;
+
+		public ExtractionJob(IMessage m, IUser a, DBGuild g, DBNormalUser u, DBLink l, DBVideo v, long t, boolean o, Integer c, int mu, boolean e)
 		{
-			channel = ch;
-			author = u;
-			nickname = n;
-			filename = f;
+			message = m;
+			author = a;
+			guild = g;
+			user = u;
+			link = l;
+			video = v;
 			timecode = t;
+			useOffset = o;
 			frameCount = c;
+			maxUserCount = mu;
+			elevated = e;
 		}
 	}
 }
