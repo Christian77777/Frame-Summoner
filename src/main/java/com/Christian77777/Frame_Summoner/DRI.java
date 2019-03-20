@@ -263,9 +263,9 @@ public class DRI implements IListener<ReadyEvent>
 			{
 				db.setVideoUnusable(s.getNickname(), false);
 			}
+			logger.info("Lost Files: {}", Arrays.toString(unusable.toArray()));
+			logger.info("New Files Found: {}", Arrays.toString(newFiles.toArray()));
 		}
-		logger.info("Lost Files: {}", Arrays.toString(unusable.toArray()));
-		logger.info("New Files Found: {}", Arrays.toString(newFiles.toArray()));
 	}
 
 	public ArrayList<IChannel> getAnnoucementChannels()
