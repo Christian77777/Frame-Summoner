@@ -125,7 +125,7 @@ public class Database
 		try
 		{
 			c = DriverManager.getConnection(connectionPath, config.toProperties());
-			logger.info("Opened Local Database Successfully");
+			logger.info("Opened Local Database");
 			c.setAutoCommit(false);
 		}
 		catch (Exception e)
@@ -136,10 +136,15 @@ public class Database
 		lock.lock();
 		try (Statement stmt = c.createStatement();)
 		{
-			//Date Field: (MM/dd HH:mm:ss)
+
+			ResultSet rs = stmt.executeQuery("SELECT sqlite_version();");
+			rs.next();
+			logger.info("Library Version: {}",rs.getString(1));
+			rs.close();
 			generateTablesAndTriggers(stmt);
 			generateStatements();
 			c.commit();
+			logger.info("Database Verified");
 		}
 		catch (SQLException e)
 		{
@@ -221,11 +226,13 @@ public class Database
 			psUpdateOffset.close();
 			psGetAllChannels.close();
 			c.close();
+			logger.info("Database closed");
 		}
 		catch (SQLException e)
 		{
 			logger.catching(e);
 		}
+		lock.unlock();
 	}
 
 	/**
