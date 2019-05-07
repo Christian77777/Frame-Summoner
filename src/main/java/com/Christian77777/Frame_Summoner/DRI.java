@@ -19,13 +19,12 @@
 
 package com.Christian77777.Frame_Summoner;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
@@ -33,21 +32,24 @@ import java.net.URL;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Map.Entry;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
-import javax.swing.ImageIcon;
-import javax.swing.JOptionPane;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.Christian77777.Frame_Summoner.Database.DBChannel;
+import com.Christian77777.Frame_Summoner.Database.DBVideo;
+import com.Christian77777.Frame_Summoner.Listeners.ChannelDeleted;
+import com.Christian77777.Frame_Summoner.Listeners.GuildSetup;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.CommandListener;
 import sx.blah.discord.api.ClientBuilder;
 import sx.blah.discord.api.IDiscordClient;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.ReadyEvent;
-import sx.blah.discord.handle.obj.ActivityType;
 import sx.blah.discord.handle.obj.IChannel;
-import sx.blah.discord.handle.obj.IRole;
-import sx.blah.discord.handle.obj.StatusType;
 import sx.blah.discord.util.DiscordException;
 import sx.blah.discord.util.RequestBuffer;
 
@@ -61,22 +63,14 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static String version = new String("1.2.3");
-	public static TrayMenu menu;
-	private String token = new String("fake");
-	private String serverName = new String("JoeBlow's Server");
-	private String adminChannelName = new String("bot-spam");
-	private String adminRoleName = new String("ADMIN");
-	private String userRoleName = new String("user");
-	private String ffmpegDir = null;
-	private String ffprobeDir = null;
-	private String videoDir = null;
-	private boolean changeDir = false;
+	public static final String version = new String("2.0.0");
+	public static final String prefix = new String("fs!");
+	public static LocalInterface menu;
+	private UserActivity instructions;
 	private IDiscordClient api;
 	private CommandListener actions;
-	private IChannel adminChannel = null;
-	private IRole adminRole = null;
-	private IRole userRole = null;
+	private Properties prop;
+	private Database db;
 
 	/**
 	 * @param args
@@ -91,273 +85,46 @@ public class DRI implements IListener<ReadyEvent>
 			dir = temp.getAbsolutePath();
 		System.setProperty("directory", dir);
 		logger = LogManager.getLogger();
-		logger.info("Directory name found: {}", dir);
+		logger.info("Directory resolved to: {}", dir);
 		checkIfSingleInstance();
-		TrayMenu menu;
-		menu = new TrayMenu();
-		menu.showMenu();
+		//Read Config and refresh database local data before interfacing with Discord
+		DRI controller = new DRI();
+		//Connect to Discord, refresh database remote data, establish bot commands, and Start UI
+		controller.connectToDiscord();
 	}
 
-	@Override
-	public void handle(ReadyEvent event)
-	{
-		Thread.currentThread().setName("DiscordConnectionThread");
-		this.api = event.getClient();
-		logger.info("Connected to Discord");
-		for (IChannel ch : api.getChannels())
-		{
-			if (ch.getName().equals(adminChannelName))
-			{
-				adminChannel = ch;
-				logger.info("Found Admin Channel: {}", adminChannel.getLongID());
-				break;
-			}
-		}
-		for (IRole r : api.getRoles())
-		{
-			if (r.getName().equals(adminRoleName))
-			{
-				adminRole = r;
-				logger.info("Found Admin Role: {}", adminRole.getLongID());
-			}
-		}
-		for (IRole r : api.getRoles())
-		{
-			if (r.getName().equals(userRoleName))
-			{
-				userRole = r;
-				logger.info("Found User Role: {}", userRole.getLongID());
-			}
-		}
-		try
-		{
-			Process x = Runtime.getRuntime().exec(ffmpegDir);
-			StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
-			StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
-			reader.start();
-			eater.start();
-			if (x.waitFor(100, TimeUnit.MILLISECONDS))
-
-				logger.info("{} recognized", ffmpegDir);
-
-			else
-				logger.info("{} accepted", ffmpegDir);
-
-		}
-		catch (InterruptedException | IOException e)
-		{
-			logger.error("{} rejected", ffmpegDir);
-			logger.fatal("File Path for FFMPEG Rejected, please put the correct path in the values.txt file and restart.");
-			System.exit(1);
-		}
-		try
-		{
-			Process x = Runtime.getRuntime().exec(ffprobeDir);
-			StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
-			StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
-			reader.start();
-			eater.start();
-			if (x.waitFor(100, TimeUnit.MILLISECONDS))
-				logger.info("{} recognized", ffprobeDir);
-			else
-				logger.info("{} accepted", ffprobeDir);
-
-		}
-		catch (InterruptedException | IOException e)
-		{
-			logger.error("{} rejected", ffmpegDir);
-			logger.fatal("File Path for FFprobe Rejected, please put the correct path in the values.txt file and restart.");
-			System.exit(1);
-		}
-		if (!new File(videoDir).exists() || !new File(videoDir).isDirectory())
-		{
-			logger.error("Video Directory invalid: {}", videoDir);
-			//New Thread spawned, needs own reference
-			final String vDir = videoDir;
-			String message;
-			if(changeDir)
-				message = "Video Directory Invalid!\n`" + vDir + "`\nUse s!dir [File Path (without quotes)] to change path and reboot";
-			else
-				message = "Video Directory Invalid!\n`" + vDir + "`\nEdit values.txt and reboot";
-			RequestBuffer.request(() -> {
-				adminChannel.sendMessage(message);
-			});
-			videoDir = null;
-		}
-		if (adminChannel != null && adminRole != null && userRole != null)
-		{
-			//api.changePresence(status, activity, text);
-			actions = new CommandListener(
-					new UserActivity(this, adminChannel, adminRole, userRole, serverName, ffmpegDir, ffprobeDir, videoDir, changeDir).getRegistry());
-			api.getDispatcher().registerListener(actions);
-			updateStatus();
-			RequestBuffer.request(() -> {
-				adminChannel.sendMessage("Frame Extractor Started");
-			});
-			menu.setupComplete();
-		}
-		else
-		{
-			if (adminChannel == null)
-				logger.fatal("Admin Channel Not Found!");
-			if (adminRole == null)
-				logger.fatal("Admin Role Not Found!");
-			if (userRole == null)
-				logger.fatal("User Role Not Found!");
-			//videoDir already handled
-		}
-	}
-
-	public void editVideoDirectory(String path, boolean alertDiscord, CommandContext ctx)
-	{
-		String[] storage = new String[9];
-		try (FileReader file = new FileReader(DRI.dir + File.separator + "values.txt"); BufferedReader in = new BufferedReader(file);)
-		{
-			for (int x = 0; x < 9; x++)
-			{
-				storage[x] = in.readLine();
-			}
-			storage[7] = storage[7].substring(0, 16) + path;
-		}
-		catch (StringIndexOutOfBoundsException | NullPointerException | IOException e)
-		{
-			logger.fatal("Could not read values.txt\n Please edit before rerunning Program\nOr Delete to generate a clean values.txt");
-			if (alertDiscord)
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Failed to read prexisting values.txt, shutting down...");
-				});
-			}
-			System.exit(20);
-		}
-		try (PrintWriter printer = new PrintWriter(DRI.dir + File.separator + "values.txt");)
-		{
-			for (int x = 0; x < 9; x++)
-			{
-				printer.println(storage[x]);
-			}
-			printer.flush();
-			printer.close();
-		}
-		catch (IOException e)
-		{
-			logger.fatal("Failed to Generate values.txt: ", e);
-			if (alertDiscord)
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Major Error rewriting values.txt, shutting down...");
-				});
-			}
-			System.exit(20);
-		}
-	}
-
-	public void disconnect(String message)
-	{
-		RequestBuffer.request(() -> {
-			adminChannel.sendMessage(message);
-		});
-		api.getDispatcher().unregisterListener(actions);
-		api.logout();
-		api = null;
-		actions = null;
-	}
-
-	public void sendCommand()
-	{
-		String s = (String) JOptionPane.showInputDialog(null, "Send Message or Command from Frame-Summoner Discord Bot", "Frame-Summoner Message",
-				JOptionPane.INFORMATION_MESSAGE, new ImageIcon(TrayMenu.image), null, null);
-		adminChannel.sendMessage(s.substring(0, Math.min(s.length(), 2000)));
-	}
-
-	public void updateStatus()
-	{
-		try
-		{
-			int fileCount = new File(videoDir).listFiles().length;
-			if (fileCount > 0)
-			{
-				api.changePresence(StatusType.ONLINE, ActivityType.WATCHING, fileCount + " videos");
-			}
-			else
-			{
-				api.changePresence(StatusType.IDLE, ActivityType.WATCHING, "nothing");
-			}
-		}
-		catch (NullPointerException f)
-		{
-			//logger.error("File Path Provided in values.txt invalid", f);
-			//Already reported
-			api.changePresence(StatusType.DND);
-		}
-	}
-
-	private void readConfig()
-	{
-		try (FileReader file = new FileReader(dir + File.separator + "values.txt"); BufferedReader in = new BufferedReader(file);)
-		{
-			token = in.readLine().substring(6);
-			serverName = in.readLine();
-			serverName = serverName.substring(5, Math.min(40, serverName.length()));
-			adminChannelName = in.readLine().substring(17);
-			adminRoleName = in.readLine().substring(14);
-			userRoleName = in.readLine().substring(13);
-			ffmpegDir = in.readLine().substring(21);
-			ffprobeDir = in.readLine().substring(22);
-			videoDir = in.readLine().substring(16);
-			changeDir = in.readLine().substring(35).equals("Y");
-			logger.info(
-					"\n\tToken (masked Ending): {}\n\tServer Name: {}\n\tAdmin Channel Name: {}\n\tAdmin Role Name: {}\n\tUser Role Name: {}\n\tFFMPEG Path: {}\n\tFFprobe Path: {}\n\tVideo Path: {}\n\tAllow Changing the Video Path: {}",
-					token.substring(token.length() - 6, token.length() - 1), serverName, adminChannelName, adminRoleName, userRoleName, ffmpegDir,
-					ffprobeDir, videoDir, changeDir);
-		}
-		catch (StringIndexOutOfBoundsException | NullPointerException e)
-		{
-			logger.fatal("Could not read values.txt\n Please edit before rerunning Program\nOr Delete to generate a clean values.txt");
-			System.exit(20);
-		}
-		catch (FileNotFoundException o)
-		{
-			try
-			{
-				PrintWriter printer = new PrintWriter(dir + File.separator + "values.txt");
-				printer.println("Token=reallyLongWord");
-				printer.println("Name=JoeBlow's Server");
-				printer.println("AdminChannelName=bot-spam");
-				printer.println("AdminRoleName=ADMIN");
-				printer.println("UserRoleName=user");
-				printer.println("ffmpeg.exe File Path=*OS path to ffmpeg.exe*");
-				printer.println("ffprobe.exe File Path=*OS path to ffprobe.exe*");
-				printer.println("Video Directory=Choose the directory of the videos to access here");
-				printer.println("AllowDirectoryChangeThroughDiscord=N");
-				printer.flush();
-				printer.close();
-				logger.warn(
-						"Created values.txt\nPlease Edit before Using Program\n Remember to not use Quotation Marks when specifying file paths with spaces");
-			}
-			catch (IOException e)
-			{
-				logger.fatal("Failed to Generate values.txt: ", e);
-			}
-			System.exit(20);
-		}
-		catch (IOException o)
-		{
-			logger.fatal("IO Exception While Reading Parameters", o);
-			System.exit(20);
-		}
-		File videos = new File(videoDir);
-		if (!videos.exists())
-		{
-			videos.mkdirs();
-		}
-	}
-
+	/**
+	 * Read in the Config,
+	 * Create the Frame-cache folder if necessary
+	 * Establish the Database connection
+	 * TODO Refresh Video Files
+	 * End with Terminating Connection Call
+	 */
 	public DRI()
 	{
 		readConfig();
+		File f = new File(dir + File.separator + "frame-cache");
+		if (!f.exists())
+		{
+			if (!f.mkdir())
+			{
+				logger.fatal("Could not create Frame-cache folder");
+				System.exit(4);
+			}
+		}
+		db = new Database(dir);
+		refreshVideos();
+		menu = new LocalInterface(this);
 	}
 
+	public void connectDatabase()
+	{
+		db = new Database(dir);
+	}
+
+	/**
+	 * Establish Connection to Discord and terminate thread.
+	 */
 	public void connectToDiscord()
 	{
 		if (api != null)
@@ -372,18 +139,326 @@ public class DRI implements IListener<ReadyEvent>
 				e.printStackTrace();
 			}
 		}
-		ClientBuilder clientBuilder = new ClientBuilder(); // Creates the ClientBuilder instance
-		clientBuilder.withToken(token); // Adds the login info to the builder
+		ClientBuilder clientBuilder = new ClientBuilder();
+		clientBuilder.withToken(prop.getProperty("Discord_Token"));
+		clientBuilder.registerListener(new GuildSetup(db, prop, prefix));
+		clientBuilder.registerListener(new ChannelDeleted(db));
+		clientBuilder.registerListener(this);
+		clientBuilder.registerListener(menu);
 		try
 		{
-			api = clientBuilder.login(); // Creates and logs in the client instance
-			api.getDispatcher().registerListener(this);
+			api = clientBuilder.login();//Thread Complete, does not block
 		}
 		catch (DiscordException e)
-		{ // This is thrown if there was a problem building the client
-			logger.fatal("Failed To Connect: Probably a bad Discord Token");
-			logger.catching(e);
+		{
+			logger.fatal("Failed To Connect: Probably a bad Discord Token", e);
 			System.exit(21);
+		}
+	}
+
+	@Override
+	public void handle(ReadyEvent event)
+	{
+		Thread.currentThread().setName("DiscordConnectionThread");
+		this.api = event.getClient();
+		logger.info("Connected to Discord");
+		instructions = new UserActivity(this, api, db, prop, prefix);
+		actions = new CommandListener(instructions.getRegistry());
+		api.getDispatcher().registerListener(actions);
+	}
+
+	public void disconnect(String message)
+	{
+		for (IChannel c : getAnnoucementChannels())
+		{
+			RequestBuffer.request(() -> {
+				c.sendMessage(message);
+			});
+		}
+		api.getDispatcher().unregisterListener(actions);
+		api.logout();
+		db.closeDatabase();
+		api = null;
+		actions = null;
+		db = null;
+	}
+
+	public void editVideoDirectory(String path, boolean alertDiscord, CommandContext ctx)
+	{
+		prop.setProperty("Video_Directory", path);
+		try
+		{
+			FileOutputStream prop_file = new FileOutputStream(DRI.dir + File.separator + "config.properties");
+			prop.store(prop_file, "Frame-Summoner Properties");
+			instructions.updateProperties(prop);
+		}
+		catch (IOException e)
+		{
+			logger.fatal("Could Not Save to config.properties", e);
+			System.exit(20);
+		}
+	}
+
+	/**
+	 * If video removed, mark as unusable
+	 * If new video found, ignore, require manual addition.
+	 * Just remark its existence in the console.
+	 */
+	public void refreshVideos()
+	{
+		String[] realFiles = new File(prop.getProperty("Video_Directory")).list();
+		Arrays.sort(realFiles, null);
+		ArrayList<DBVideo> cache = db.getVideoList();
+		ArrayList<DBVideo> unusable = new ArrayList<DBVideo>();
+		ArrayList<String> newFiles = new ArrayList<String>();
+		if (realFiles.length != 0 && !cache.isEmpty())
+		{
+			int lIndex = 0;
+			int rIndex = 0;
+			//Iterate through both sorted arrays for any match
+			while (cache.size() > lIndex && realFiles.length > rIndex)
+			{
+				int comparision = cache.get(lIndex).getFilename().compareTo(realFiles[rIndex]);
+				if (comparision > 0)//cache missing item from realFiles
+				{
+					newFiles.add(realFiles[rIndex]);
+					rIndex++;
+				}
+				else if (comparision < 0)//File indexed in Database now missing!
+				{
+					if (cache.get(lIndex).isUsable())
+					{
+						unusable.add(cache.get(lIndex));
+					}
+					lIndex++;
+				}
+				else
+				{
+					rIndex++;
+					lIndex++;
+				}
+				//else, good
+			}
+		}
+		else if (realFiles.length == 0)//Likely file path accidently modified
+			unusable = cache;
+		else//Likely Fresh Database, Database has no videos
+			unusable = null;
+		if (unusable == null)
+		{
+			logger.info("Database is fresh and has no videos, make sure verify them before usage");
+		}
+		else if (cache.size() == unusable.size())
+		{
+			logger.info("Database record is completely different from actual Video Directory, maybe double check the file path? \"{}\"",
+					prop.getProperty("Video_Directory"));
+			for (DBVideo s : unusable)
+			{
+				db.setVideoUnusable(s.getNickname(), false);
+			}
+		}
+		else
+		{
+			for (DBVideo s : unusable)
+			{
+				db.setVideoUnusable(s.getNickname(), false);
+			}
+			logger.info("Lost Files: {}", Arrays.toString(unusable.toArray()));
+			logger.info("New Files Found: {}", Arrays.toString(newFiles.toArray()));
+		}
+	}
+
+	public ArrayList<IChannel> getAnnoucementChannels()
+	{
+		ArrayList<IChannel> channels = new ArrayList<IChannel>();
+		for (DBChannel c : db.getServerChannels(null))
+		{
+			if (c.isAnnoucement())
+			{
+				channels.add(api.getChannelByID(c.getId()));
+			}
+		}
+		return channels;
+	}
+
+	public void readConfig()
+	{
+		try (InputStream defaultInput = getClass().getClassLoader().getResourceAsStream("default.properties");)
+		{
+			Properties defaults = new Properties();
+			if (defaultInput != null)
+			{
+				defaults.load(defaultInput);
+			}
+			else
+			{
+				logger.fatal("Main Property file not found in the classpath");
+				System.exit(40);
+			}
+			try (FileInputStream actualInput = new FileInputStream(new File(dir + File.separator + "config.properties"));)
+			{
+				prop = new Properties(defaults);
+				prop.load(actualInput);
+				boolean readFailed = false;
+				for (Entry<Object, Object> entry : defaults.entrySet())
+				{
+					try
+					{
+						//Default Value matched
+						if (prop.getProperty((String) entry.getKey()).equals((String) entry.getValue()))
+						{
+							logger.error("Config not properly configured, still has default values\nKey: `{}` has Value `{}`",
+									(String) entry.getKey(), (String) entry.getValue());
+							prop.remove(entry.getKey());//Remove Key to not double dip on the validation error
+							readFailed = true;
+						}
+					}
+					catch (NullPointerException a)
+					{
+						logger.error(
+								"Config not properly configured, Key: `{}` does not exist\nDelete \"config.properties\" to regenerate the properties on the next program start",
+								(String) entry.getKey());
+						readFailed = true;
+					}
+				}
+				//Properties Specific Validation
+				String value = prop.getProperty("Bot_Manager");
+				if (value != null)
+				{
+					try
+					{
+						Long.parseLong(value);
+					}
+					catch (NumberFormatException e)
+					{
+						logger.error("Config not properly configured, \nKey: `Bot_Manager` is not a parsable SnowflakeID");
+						readFailed = true;
+					}
+				}
+				value = prop.getProperty("MaxUserExtracts");
+				try
+				{
+					Byte.parseByte(value);
+				}
+				catch (NullPointerException | NumberFormatException e)
+				{
+					logger.error("Config not properly configured, \nKey: `MaxUserExtracts` is not a number less then 128");
+					readFailed = true;
+				}
+				value = prop.getProperty("MaxServerExtracts");
+				try
+				{
+					Integer.parseInt(value);
+				}
+				catch (NullPointerException | NumberFormatException e)
+				{
+					logger.error("Config not properly configured, \nKey: `MaxServerExtracts` is not a number less then 2 million");
+					readFailed = true;
+				}
+				value = prop.getProperty("FFmpeg_Path");
+				if (value != null && !new File(value).exists())
+				{
+					logger.error("Config not properly configured, \nKey: `FFmpeg_Path` is not a valid file path");
+					readFailed = true;
+				}
+				try
+				{
+					Process x = Runtime.getRuntime().exec(value);
+					StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
+					StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
+					reader.start();
+					eater.start();
+					if (x.waitFor(100, TimeUnit.MILLISECONDS))
+						logger.info("{} recognized", value);
+					else
+						logger.info("{} accepted", value);
+
+				}
+				catch (InterruptedException | IOException e)
+				{
+					logger.error("{} rejected", value);
+					logger.fatal("File Path for FFmpeg is not an executable, please put the correct path in the values.txt file and restart.");
+					readFailed = true;
+				}
+				value = prop.getProperty("FFprobe_Path");
+				if (value != null && !new File(value).exists())
+				{
+					logger.error("Config not properly configured, \nKey: `FFprobe_Path` is not a valid file path");
+					readFailed = true;
+				}
+				try
+				{
+					Process x = Runtime.getRuntime().exec(value);
+					StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
+					StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
+					reader.start();
+					eater.start();
+					if (x.waitFor(100, TimeUnit.MILLISECONDS))
+						logger.info("{} recognized", value);
+					else
+						logger.info("{} accepted", value);
+
+				}
+				catch (InterruptedException | IOException e)
+				{
+					logger.error("{} rejected", value);
+					logger.fatal("File Path for FFprobe is not an executable, please put the correct path in the values.txt file and restart.");
+					readFailed = true;
+				}
+				value = prop.getProperty("Video_Directory");
+				if (value != null && !new File(value).exists() && !new File(value).isDirectory())
+				{
+					logger.error("Config not properly configured, \nKey: `Video_Directory` is not a valid file path");
+					readFailed = true;
+				}
+				value = prop.getProperty("AllowDirectoryChange");
+				if (value != null && !value.equals("Y") && !value.equals("N"))
+				{
+					logger.error("Config not properly configured, \nKey: `AllowDirectoryChange` is not either a 'Y' or 'N'");
+					readFailed = true;
+				}
+				if (readFailed)
+					System.exit(21);
+				else
+				{
+					String response = new String("");
+					for (Entry<Object, Object> entry : prop.entrySet())
+					{
+						String key = (String) entry.getKey();
+						String val = (String) entry.getValue();
+						if (key.equals("Discord_Token"))
+						{
+							val = "..." + val.substring(val.length() - 6, val.length() - 1);
+						}
+						response += "\n\t" + key + ": " + val;
+
+					}
+					logger.info("Frame-Summoner Properties{}", response);
+				}
+				if (instructions != null)
+				{
+					instructions.updateProperties(prop);
+				}
+			}
+			catch (IOException b)
+			{
+				//Create Properties File
+				try (FileOutputStream newProperties = new FileOutputStream(new File(dir + File.separator + "config.properties")))
+				{
+					defaults.store(newProperties, "Frame-Summoner Properties File");
+					logger.warn("Created values.txt\nPlease Edit before Using Program\n Omit Quotation Marks in File Paths");
+				}
+				catch (IOException c)
+				{
+					logger.fatal("Failed to Generate values.txt: ", c);
+				}
+				System.exit(0);
+			}
+		}
+		catch (IOException e1)
+		{
+			logger.fatal("IOException reading default config.properties", e1);
+			System.exit(40);
 		}
 	}
 
