@@ -35,6 +35,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.sqlite.SQLiteConfig;
 import org.sqlite.SQLiteOpenMode;
+import org.sqlite.util.OSInfo;
 
 /**
  * @author Christian
@@ -136,9 +137,9 @@ public class Database
 		lock.lock();
 		try (Statement stmt = c.createStatement();)
 		{
-
 			ResultSet rs = stmt.executeQuery("SELECT sqlite_version();");
 			rs.next();
+			logger.info("Current Architecture: {}", OSInfo.getNativeLibFolderPathForCurrentOS());
 			logger.info("Library Version: {}",rs.getString(1));
 			rs.close();
 			generateTablesAndTriggers(stmt);
@@ -1388,7 +1389,10 @@ public class Database
 		}
 		catch (SQLException e)
 		{
-			logger.catching(e);
+			if(e.getMessage().equals("[SQLITE_CONSTRAINT]  Abort due to constraint violation (FOREIGN KEY constraint failed)"))
+				logger.warn("Video not found in Database");
+			else
+				logger.catching(e);
 		}
 		lock.unlock();
 		return result;

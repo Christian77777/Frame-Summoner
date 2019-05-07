@@ -50,10 +50,10 @@ public class LocalInterface implements IListener<ReadyEvent>
 	public LocalInterface(DRI c)
 	{
 		controller = c;
-		menu = new PopupMenu();//Must exist for boolean down the road
-		menu.setEnabled(false);
 		if (SystemTray.isSupported())
 		{
+			menu = new PopupMenu();
+			menu.setEnabled(false);
 			//Create Menu Items and build Tray icon
 			logger.info("Tray Menu Supported");
 			refresh = new MenuItem("File Refresh");
@@ -88,7 +88,7 @@ public class LocalInterface implements IListener<ReadyEvent>
 	@Override
 	public void handle(ReadyEvent event)
 	{
-		if (menu.isEnabled())
+		if (menu != null && menu.isEnabled())
 		{
 			logger.info("Frame-Summoner rebooted");
 		}

@@ -448,9 +448,9 @@ public class Extractor
 		String offsetTime = convertMilliToTime(job.timecode + (job.useOffset ? job.video.getOffset() : 0));
 		//Extraction by exact time code: ffmpeg -ss ##:##:##.### -i "C:\Path\to\Video" -t 1 -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
 		//Extraction by Timestamp and frame number in range [0,fps):ffmpeg -ss ##:##:## -i "C:\Path\to\Video" -filter:v "select=gte(n/,%%FRAMENUMBER)" -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
-		String command = "\"" + prop.getProperty("FFmpeg_Path") + "\" -loglevel quiet -y -ss " + offsetTime + " -i \"" + videoFile.getAbsolutePath()
-				+ "\" " + timecode + "-f image2 -frames:v 1 \"" + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname()
-				+ ".png\"";
+		String command = "" + prop.getProperty("FFmpeg_Path") + " -loglevel quiet -y -ss " + offsetTime + " -i " + videoFile.getAbsolutePath()
+				+ " " + timecode + "-f image2 -frames:v 1 " + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname()
+				+ ".png";
 		try
 		{
 			logger.info("Command: ({})", command);
@@ -627,9 +627,9 @@ public class Extractor
 		 * [video duration] <-Priority
 		 * [format duration]
 		 */
-		String command = "\"" + prop.getProperty("FFprobe_Path")
-				+ "\" -v error -show_entries format=duration:stream=r_frame_rate:stream=duration -select_streams v:0 -print_format default=noprint_wrappers=1:nokey=1 -sexagesimal \""
-				+ video.getAbsolutePath() + "\"";
+		String command = "" + prop.getProperty("FFprobe_Path")
+				+ " -v error -show_entries format=duration:stream=r_frame_rate:stream=duration -select_streams v:0 -print_format default=noprint_wrappers=1:nokey=1 -sexagesimal "
+				+ video.getAbsolutePath();
 		try
 		{
 			logger.info("Command: >{}", command);
@@ -780,7 +780,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Hours <" + hoursT + "> contained non-numeric characters in Timecode: " + text);
+				throw new IllegalArgumentException("Hours `" + hoursT + "` contained non-numeric characters in Timecode: <" + text + ">");
 			}
 			try
 			{
@@ -788,7 +788,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Minutes <" + minutesT + "> contained non-numeric characters in Timecode: " + text);
+				throw new IllegalArgumentException("Minutes `" + minutesT + "` contained non-numeric characters in Timecode: <" + text + ">");
 			}
 			try
 			{
@@ -796,7 +796,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Seconds <" + secondsT + "> contained non-numeric characters in Timecode: " + text);
+				throw new IllegalArgumentException("Seconds `" + secondsT + "` contained non-numeric characters in Timecode: <" + text + ">");
 			}
 			try
 			{
@@ -804,7 +804,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Milliseconds <" + millisecondsT + "> contained non-numeric characters in Timecode: " + text);
+				throw new IllegalArgumentException("Milliseconds `" + millisecondsT + "` contained non-numeric characters in Timecode: <" + text + ">");
 			}
 			if (framerate != null && frameCount != null)
 			{

@@ -24,6 +24,10 @@
 			<id>jitpack.io</id>
 			<url>https://jitpack.io</url>
 		</repository>
+		<!-- <repository>
+			<id>custom-builds</id>
+			<url>file://${basedir}/lib</url>
+		</repository> -->
 	</repositories>
 	<dependencies>
 		<dependency>
@@ -74,6 +78,7 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-eclipse-plugin</artifactId>
+				<version>2.10</version>
 				<configuration>
 					<downloadSources>true</downloadSources>
 					<downloadJavadocs>true</downloadJavadocs>
