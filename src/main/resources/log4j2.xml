@@ -19,7 +19,7 @@ along with FTUServerBot.  If not, see <http://www.gnu.org/licenses/>.
 <Configuration strict="true" name="XMLConfig"
 	monitorInterval="5">
 	<Appenders>
-		<Appender type="Console" name="SYSOUT">
+		<Appender type="Console" name="SYSOUT" >
 			<PatternLayout
 				pattern="%highlight{[%-5level] %d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %c{1} - %msg%n}{FATAL=red, ERROR=red, WARN=yellow, INFO=White, DEBUG=Cyan, TRACE=Blue}" />
 		</Appender>
@@ -41,7 +41,17 @@ along with FTUServerBot.  If not, see <http://www.gnu.org/licenses/>.
 		<Root level="debug">
 			<AppenderRef ref="SYSOUT" />
 			<AppenderRef ref="FILE" />
+			<Filters>
+				<MarkerFilter marker="PRESENCES" onMatch="DENY" onMismatch="NEUTRAL"/>
+			</Filters>
 		</Root>
+		<!--  <Logger name="discord4j" level="DEBUG" additivity="false">
+			<AppenderRef ref="SYSOUT" />
+			<AppenderRef ref="FILE" />
+			<Filters>
+				<MarkerFilter marker="PRESENCES" onMatch="DENY" onMismatch="NEUTRAL"/>
+			</Filters>
+		</Logger>-->
 	</Loggers>
 
 </Configuration>

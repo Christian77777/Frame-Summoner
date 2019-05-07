@@ -29,6 +29,7 @@ public class StreamGobbler extends Thread
 
 	private final InputStream is;
 	private final boolean post;
+	private String lastPost;
 
 	public StreamGobbler(InputStream is, boolean post)
 	{
@@ -43,12 +44,12 @@ public class StreamGobbler extends Thread
 			InputStreamReader isr;
 			isr = new InputStreamReader(is);
 			BufferedReader br = new BufferedReader(isr);
-			String line = null;
+			String line;
 			while ((line = br.readLine()) != null)
 			{
-				line.trim();
+				lastPost = line.trim();
 				if (post)
-					System.out.println(line);
+					System.out.println(lastPost);
 			}
 		}
 		catch (IOException ioe)
@@ -56,5 +57,10 @@ public class StreamGobbler extends Thread
 			ioe.printStackTrace();
 			System.exit(20);
 		}
+	}
+	
+	public String lastPost()
+	{
+		return lastPost;
 	}
 }
