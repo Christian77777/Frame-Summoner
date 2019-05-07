@@ -202,7 +202,7 @@ public class DRI implements IListener<ReadyEvent>
 	/**
 	 * If video removed, mark as unusable
 	 * If new video found, ignore, require manual addition.
-	 * Just remark its existance in the console.
+	 * Just remark its existence in the console.
 	 */
 	public void refreshVideos()
 	{
@@ -426,7 +426,7 @@ public class DRI implements IListener<ReadyEvent>
 					{
 						String key = (String) entry.getKey();
 						String val = (String) entry.getValue();
-						if (key.equals("DiscordToken"))
+						if (key.equals("Discord_Token"))
 						{
 							val = "..." + val.substring(val.length() - 6, val.length() - 1);
 						}

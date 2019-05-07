@@ -142,7 +142,7 @@ public class UserActivity
 		{ tier3L, vipL });
 		addVerifyNewVideosCommand(2, new Limiter[]
 		{ tier3L, vipL });
-		addRemoveVideosCommand(2, new Limiter[] 
+		addRemoveVideosCommand(2, new Limiter[]
 		{ tier3L, vipL });
 		addRestrictCommand(2, new Limiter[]
 		{ tier3L, vipL });
@@ -170,7 +170,7 @@ public class UserActivity
 		addChangeListingModeCommand(1, new Limiter[]
 		{ tier3L, adminL });
 		addChangeChannelTierCommand(1, new Limiter[]
-		{ privateAdminL });//Allowed in PMs, Admin Check must be done in program if Private
+		{ privateAdminL });//Allowed in PMs, Admin Check must be done in program if Private Channel
 		addChangeChannelAnnoucementCommand(1, new Limiter[]
 		{ tier3L, adminL });
 		addSetServerLimit(1, new Limiter[]
@@ -186,7 +186,7 @@ public class UserActivity
 		//Generic Commands
 		addInfoCommand(0, new Limiter[]
 		{ tier1L, listedL });
-		addGuideCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 1
+		addGuideCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 0
 		{});
 		addHelpCommand(0, new Limiter[]
 		{ tier1L, listedL });
@@ -376,74 +376,44 @@ public class UserActivity
 		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
 		String name = "frame";
 		String[] aliases = new String[]
-		{ "extract" };
-		String usage = prefix + name + " [Filename] [Timecode] <-f Frame Number> <-o>";
+		{ "extract", "f" };
+		String usage = prefix + name + " <-f Frame Number> <-o> [Filename] [Timecode]";
 		String description = "Extracts frame from video and uploads to Discord";
 		String detailedDescription = "Extracts a Frame from specified video at the timecode and uploads it to Discord if authorized.\nUsage: `"
 				+ usage
-				+ "`\n*[Filename]* = Name of Video file validated in Database, use fs!list to see avaliable files\n*[Timecode]* = Timecode to extract frame from in video, in this format `##:##:##<.###>`, milliseconds optional\n*<-f Frame Number>* = Increment the frame selected by the timecode, easier way to be precise.\n*<-o>* = Ignore video link offset. __Advanced__\n - Several Restrictions on command to prevent abuse";
+				+ "`\n*[Filename]* = Name of Video file validated in Database, use fs!list to see avaliable files\n*[Timecode]* = Timecode specifying which frame to extract, in this format `##:##:##.###`, hours, minutes, milliseconds optional\n*<-f Frame Number>* = Increment the frame selected by the timecode, easier way to be precise.\n*<-o>* = Ignore video link offset. __Advanced__\n - Several Restrictions on command to prevent abuse";
 		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		options.addOption(Option.builder("o").desc("Ignores Preset Offset when used").longOpt("offset").build());
+		options.addOption(Option.builder("f").argName("Number").desc("Skip Frames to find actual value").hasArg().longOpt("frames").build());
 		Command command = b.onCalled(ctx -> {
-			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
-			if (args.size() == 1 && args.get(0).equals(""))
-				args.remove(0);
-			boolean useOffset = true;
-			String filename = null;
-			String timecode = null;
-			Integer frameCount = null;
-			//TODO Deal with repeated flags
 			try
 			{
-				while (!args.isEmpty())
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, true);
+				try
 				{
-					String arg = assembleString(args);
-					if (arg.startsWith("-"))
+					String[] required = line.getArgs();
+					if (required.length == 2)
 					{
-						switch (arg)
+						boolean ignoreOffset = line.hasOption('o');
+						Integer frameCount = null;
+						if (line.hasOption('f'))
 						{
-							case "-o":
-								useOffset = false;
-								break;
-							case "-f":
-								try
-								{
-									frameCount = Integer.valueOf(assembleString(args));
-									if (frameCount <= 0 || frameCount > 1000)
-									{
-										final int frameCount2 = frameCount;
-										RequestBuffer.request(() -> {
-											return ctx.getChannel()
-													.sendMessage("Invalid Frame Count value: `" + frameCount2 + "`! Valid range between 1 and 1000");
-										});
-										return;
-									}
-								}
-								catch (NumberFormatException e)
-								{
-									final int frameCount2 = frameCount;
-									RequestBuffer.request(() -> {
-										return ctx.getChannel().sendMessage("Frame Count value: " + frameCount2 + "\nnot a number!");
-									});
-									return;
-								}
-								break;
-							default:
+							frameCount = Integer.valueOf(line.getOptionValue('f'));
+							if (frameCount <= 0 || frameCount > 1000)
+							{
+								final int frameCount2 = frameCount;
 								RequestBuffer.request(() -> {
-									ctx.getChannel().sendMessage("Unknown Flag! Do " + prefix + "help frame for proper usage");
+									return ctx.getChannel()
+											.sendMessage("Invalid Frame Count value: `" + frameCount2 + "`! Valid range between 1 and 1000");
 								});
 								return;
+							}
 						}
-					}
-					else if (filename == null)
-					{
-						filename = arg;
-					}
-					else if (timecode == null)
-					{
 						try
 						{
-							Extractor.convertTimeToMilli(arg, null, null);
-							timecode = arg;
+							Extractor.convertTimeToMilli(required[1], null, null);
 						}
 						catch (IllegalArgumentException e)
 						{
@@ -453,32 +423,38 @@ public class UserActivity
 							});
 							return;
 						}
+						long timecheck = Extractor.convertTimeToMilli(required[1], null, null);
+						extractor.requestFrame(ctx, required[0], required[1], frameCount, !ignoreOffset);
+					}
+					else if (required.length > 2)
+					{
+						final String response = ":octagonal_sign: Too many unmarked arguments! Arguments past: `" + required[1] + "` causing error. Flags may only come before unmarked arguments\nDo `" + prefix + "help` frame for proper usage";
+						RequestBuffer.request(() -> {
+							ctx.getChannel().sendMessage(response);
+						});
 					}
 					else
 					{
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage("Duplicate Filename or Timecode! Do " + prefix + "help frame for proper usage");
+							ctx.getChannel().sendMessage(":octagonal_sign: Not Enough Arguments! Do " + prefix + "help frame for proper usage");
 						});
-						return;
 					}
 				}
+				catch (NumberFormatException e)
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: The `-f` flag argument is not a valid integer!");
+					});
+				}
 			}
-			catch (IndexOutOfBoundsException e)
+			catch (ParseException e)
 			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do " + prefix + "help frame for proper usage");
-				});
-				return;
+				handleParseException(ctx.getChannel(), e, name);
 			}
-			if (filename != null && timecode != null)//Required Parameters
+			catch (Exception e)
 			{
-				extractor.requestFrame(ctx, filename, timecode, frameCount, useOffset);
-			}
-			else
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Not Enough Arguments! Do " + prefix + "help frame for proper usage");
-				});
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -529,7 +505,7 @@ public class UserActivity
 						}
 						else
 						{
-							if(!cache.get(lIndex).isUsable())
+							if (!cache.get(lIndex).isUsable())
 							{
 								newFiles.add(realFiles[rIndex]);
 							}
@@ -642,7 +618,7 @@ public class UserActivity
 		String name = "setUserUsage";
 		String[] aliases = new String[]
 		{ "modifyUserUsage", "changeUserUsage", "suu", "muu", "cuu" };
-		String usage = prefix + name + " [-u number] [<-n name> or <-s snowflake>]";
+		String usage = prefix + name + " [-u number] [<-n Username> or <-s SnowflakeID>]";
 		String description = ":large_orange_diamond: __VIP__: Changes how many times a User has extracted Frames today.";
 		String detailedDescription = "Changes the number of extractions executed by a User today. Useful for giving some users more extractions. \nUsage: `"
 				+ usage
@@ -738,18 +714,18 @@ public class UserActivity
 		String name = "disableServer";
 		String[] aliases = new String[]
 		{ "pauseServer" };
-		String usage = prefix + name + " <-u> [<-n GuildName> or <-s SnowflakeID>]";
+		String usage = prefix + name + " <-u> <<-n GuildName> or <-s SnowflakeID>>";
 		String description = ":large_orange_diamond: __VIP__: Disable a Server's access to Frame Extractions";
 		String detailedDescription = "Changes the number of extractions executed by a Server today. Useful for giving some Servers more extractions. \nUsage: `"
 				+ usage
-				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*[<-n GuildName> or <-s SnowflakeID>]* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
+				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*<<-n GuildName> or <-s SnowflakeID>>* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Otherwise the current server is affected. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("u").desc("New Daily Extraction Limit.").hasArg(false).longOpt("undo").build());
 		OptionGroup g1 = new OptionGroup();
 		g1.addOption(Option.builder("n").argName("GuildName").desc("Name of the Guild").hasArg().longOpt("name").build());
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
-		g1.setRequired(true);
+		g1.setRequired(false);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
 			try
@@ -810,18 +786,18 @@ public class UserActivity
 		String name = "setServerLimit";
 		String[] aliases = new String[]
 		{ "modifyServerLimit", "changeServerLimit", "ssl", "msl", "csl" };
-		String usage = prefix + name + " [-u number] [<-n GuildName> or <-s SnowflakeID>]";
-		String description = ":a: __Admin__: Changes how many times a Server has extracted Frames today.";
-		String detailedDescription = "Changes the number of extractions executed by a Server today. Useful for giving some Servers more extractions. \nUsage: `"
+		String usage = prefix + name + " [-l limit] <<-n GuildName> or <-s SnowflakeID>>";
+		String description = ":a: __Admin__: Changes the limit of how many times a Server can extract Frames in 24 hours.";
+		String detailedDescription = "Resets the number of extractions executed by a Server today. Useful for awarding more extractions. \nUsage: `"
 				+ usage
-				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*[<-n GuildName> or <-s SnowflakeID>]* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
+				+ "`\n*[-l limit]* = The new limit of times the Server can use the bot in 24 hours\n*<<-n GuildName> or <-s SnowflakeID>>* = Identify the Server to be affected by Name or Snowflake ID as declared by flag. Otherwise affects the current Server. Example `-n Server` or `-s 123456789`\n:large_orange_diamond: __VIP only__\n - VIP extractions will not affect this usage";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("l").argName("Number").desc("New Daily Extraction Limit.").hasArg().longOpt("limit").required().build());
 		OptionGroup g1 = new OptionGroup();
 		g1.addOption(Option.builder("n").argName("GuildName").desc("Name of the Guild").hasArg().longOpt("name").build());
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
-		g1.setRequired(true);
+		g1.setRequired(false);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
 			try
@@ -841,7 +817,7 @@ public class UserActivity
 							if (db.updateServerDailyLimit(limit, guild.getLongID()))
 							{
 								RequestBuffer.request(() -> {
-									ctx.getChannel().sendMessage("Today's Usage now at `" + limit + "` for " + guild.getName());
+									ctx.getChannel().sendMessage("Daily Limit now at `" + limit + "` for " + guild.getName());
 								});
 							}
 							else
@@ -897,11 +873,11 @@ public class UserActivity
 		String name = "setServerUsage";
 		String[] aliases = new String[]
 		{ "modifyServerUsage", "changeServerUsage", "ssu", "msu", "csu" };
-		String usage = prefix + name + " [-u number] [<-n GuildName> or <-s SnowflakeID>]";
+		String usage = prefix + name + " [-u number] <<-n GuildName> or <-s SnowflakeID>>";
 		String description = ":large_orange_diamond: __VIP__: Changes how many times a Server has extracted Frames today.";
 		String detailedDescription = "Changes the number of extractions executed by a Server today. Useful for giving some Servers more extractions. \nUsage: `"
 				+ usage
-				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*[<-n GuildName> or <-s SnowflakeID>]* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
+				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*<<-n GuildName> or <-s SnowflakeID>>* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Otherwise the current server is affected. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(
@@ -909,6 +885,7 @@ public class UserActivity
 		OptionGroup g1 = new OptionGroup();
 		g1.addOption(Option.builder("n").argName("GuildName").desc("Name of the Guild").hasArg().longOpt("name").build());
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
+		g1.setRequired(false);
 		options.addOptionGroup(g1);
 		Command command = b.onCalled(ctx -> {
 			try
@@ -993,10 +970,11 @@ public class UserActivity
 		String name = "restrict";
 		String[] aliases = new String[]
 		{};
-		String usage = prefix + name;
+		String usage = prefix + name + " <-u> [<-a> or <-s Video Name>]";
 		String description = ":large_orange_diamond: __VIP__: Restricts or unrestricts a video to VIP only access.";
 		String detailedDescription = "Restrict or Unrestrict a Video. Restricted videos do not exist to normal Users. VIP Users can see them, and interact with them.\nUsage: `"
-				+ usage + "`\n:large_orange_diamond: __VIP only__\n - All Extractions are halted while verifications take place";
+				+ usage
+				+ "`\n*<-u>* = Inverts the command, making the listed videos normally accessible\n*[-a or -s]* = Specifies to either affect ALL videos, or just the ones specified. Can specify more then one with -s\n:large_orange_diamond: __VIP only__\n - All Extractions temporarily halted while verifications take place";
 		detailedDescription += appendAliases(aliases);
 		Options o = new Options();
 		o.addOption("u", "undo", false, "If the Video(s) should be unrestricted instead");
@@ -1543,8 +1521,7 @@ public class UserActivity
 						{
 							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
 						}
-						word = word.length() == 0 ? "<" + ctx.getGuild().getOwner().getDisplayName(ctx.getGuild()) + ">"
-								: word.substring(0, word.length() - 1);
+						word = word.length() == 0 ? "<" + ctx.getGuild().getOwner().mention() + ">" : word.substring(0, word.length() - 1);
 						textTitle.add(":a: Administrator Roles");
 						textValue.add(word);
 						inline.add(true);
@@ -1553,7 +1530,7 @@ public class UserActivity
 						{
 							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
 						}
-						word = word.length() == 0 ? ("<>") : word.substring(0, word.length() - 1);
+						word = word.length() == 0 ? (":small_red_triangle_down:") : word.substring(0, word.length() - 1);
 						textTitle.add(mode + "ed Roles");
 						textValue.add(word);
 						inline.add(true);
@@ -1790,10 +1767,10 @@ public class UserActivity
 		String name = "addAdminRole";
 		String[] aliases = new String[]
 		{ "aar", "newAdminRole", "nar" };
-		String usage = prefix + name + " [<-n RoleID> or <-s RoleName>]";
+		String usage = prefix + name + " [<-n RoleName> or <-s SnowflakeID>]";
 		String description = ":a: __Admin__: Adds a Role as Admin for this Server.";
 		String detailedDescription = "Gives access to Admin commands for a Role in the current server\nUsage: `" + usage
-				+ "`\n*[<-n RoleID> or <-s RoleName>]* = Identify the Server Role to be affected by Name or Snowflake ID as declared by flag. Example `-n 389021830` or `-s ADMIN`\n:a: __Admin only__";
+				+ "`\n*[<-n RoleName> or <-s SnowflakeID>]* = Identify the Server Role to be affected by RoleName or Snowflake ID as declared by flag. Example `-n ADMIN` or `-s 123456789`\n:a: __Admin only__";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		OptionGroup g1 = new OptionGroup();
@@ -1860,10 +1837,10 @@ public class UserActivity
 		String name = "removeAdminRole";
 		String[] aliases = new String[]
 		{ "rar", "deleteAdminRole", "dar" };
-		String usage = prefix + name + " [<-n RoleID> or <-s RoleName>]";
+		String usage = prefix + name + " [<-n RoleName> or <-s SnowflakeID>]";
 		String description = ":a: __Admin__: Removes a Role as Admin for this Server.";
 		String detailedDescription = "Removes access to Admin commands for a Role in the current server\nUsage: `" + usage
-				+ "`\n*[<-n RoleID> or <-s RoleName>]* = Identify the Server Role to be affected by Name or Snowflake ID as declared by flag. Example `-n 389021830` or `-s ADMIN`\n:a: __Admin only__";
+				+ "`\n*[<-n RoleName> or <-s SnowflakeID>]* = Identify the Server Role to be affected by RoleName or SnowflakeID as declared by flag. Example `-n ADMIN` or `-s 123456789`\n:a: __Admin only__";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		OptionGroup g1 = new OptionGroup();
@@ -1934,7 +1911,7 @@ public class UserActivity
 		String description = ":a: __Admin__: White/Blacklists a Role to regulate Bot Usage.";
 		String detailedDescription = "Change access to normal commands for a Role in the current server depending on Black/White listing mode by listing it.\nUsage: `"
 				+ usage
-				+ "`\n*[<-n RoleName> or <-s SnowflakeID>]* = Identify the Server Role to be affected by Name or Snowflake ID as declared by flag. Example `-n ADMIN` or `-s 389021830`\n:a: __Admin only__";
+				+ "`\n*[<-n RoleName> or <-s SnowflakeID>]* = Identify the Server Role to be affected by Name or Snowflake ID as declared by flag. Example `-n ADMIN` or `-s 123456789`\n:a: __Admin only__";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		OptionGroup g1 = new OptionGroup();
@@ -2011,7 +1988,7 @@ public class UserActivity
 		String description = ":a: __Admin__: Unlists a Role that was previously White/Blacklisted.";
 		String detailedDescription = "Change access to normal commands for a Role in the current server depending on Black/White listing mode by unlisting it.\nUsage: `"
 				+ usage
-				+ "`\n*[<-n RoleName> or <-s SnowflakeID>]* = Identify the Server Role to be affected by Name or Snowflake ID as declared by flag. Example `-n ADMIN` or `-s 389021830`\n:a: __Admin only__";
+				+ "`\n*[<-n RoleName> or <-s SnowflakeID>]* = Identify the Server Role to be affected by Name or Snowflake ID as declared by flag. Example `-n ADMIN` or `-s 123456789`\n:a: __Admin only__";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		OptionGroup g1 = new OptionGroup();
@@ -2132,7 +2109,7 @@ public class UserActivity
 		String usage = prefix + name + " [-t Tier (0-3)] <<-n ChannelName> or <-s SnowflakeID>>";
 		String description = ":a: __Admin__: Changes a Channel Permission Tier.";
 		String detailedDescription = "Changes the types of commands allowed in a Channel of a Server.\nUsage: `" + usage
-				+ "`\n*[-t Tier (0-3)]* = The new Permission Tier, higher tiers allow the commands of the previous tier\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 389021830`\n:a: __Admin only__\n - Allowed in PM's to prevent lockout, but channel must be specified\n - Tier 0 = Complete Silence\n - Tier 1 = Basic Information Commands\n - Tier 2 = Normal usage\n - Tier 3 = Admin commands";
+				+ "`\n*[-t Tier (0-3)]* = The new Permission Tier, higher tiers allow the commands of the previous tier. Example: `-t 3`\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 123456789`\n:a: __Admin only__\n - Allowed in PM's, but channel then must be specified\n - Tier 0 = Complete Silence\n - Tier 1 = Basic Information Commands\n - Tier 2 = Normal usage\n - Tier 3 = Admin commands";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("t").argName("Number").desc("Channel Permission Tier [0-3]").hasArg().longOpt("tier").required().build());
@@ -2225,9 +2202,9 @@ public class UserActivity
 		{ "cca", "updateChannelAnnoucement", "uca" };
 		String usage = prefix + name + " <-u> <<-n ChannelName> or <-s SnowflakeID>>";
 		String description = ":a: __Admin__: Designate channel as Annoucement Channel.";
-		String detailedDescription = "Toggle channel as annoucement channel. These channels might get impromptu messages regarding the bot specific to the Server or Global\nUsage: `"
+		String detailedDescription = "Toggle channel as annoucement channel. These channels occasionally will get status messages like `Bot online` and such\nUsage: `"
 				+ usage
-				+ "`\n*<-u>* = Changes command to unset annoucement status\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 389021830`\n:a: __Admin only__\n - true or false can be substituted by `y` and `n` or `1` and `0`";
+				+ "`\n*<-u>* = Inverts Command to clear Annoucement status\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 123456789`\n:a: __Admin only__";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("u").desc("Channel Permission Tier [0-3]").hasArg(false).longOpt("undo").build());
@@ -2300,11 +2277,11 @@ public class UserActivity
 		String name = "createLink";
 		String[] aliases = new String[]
 		{};
-		String usage = prefix + name + " [-l Link] <-n Video Name> [-e Episode Name] <-d Description>";
+		String usage = prefix + name + " [-l Link] [-e Episode Name] <-n Video Name> <-d Description>";
 		String description = ":large_orange_diamond: __VIP__: Create's a fetchable link to a YouTube video.";
-		String detailedDescription = "Stores a link to a YouTube video, likely mirrored as a local file prepared for Frame Extraction.\nUsage: `"
+		String detailedDescription = "Stores a link to a YouTube video, likely mirrored as a local file avaliable for Frame Extraction.\nUsage: `"
 				+ usage
-				+ "`\n*[-l Link]* = Youtube Link to serve on request.\n*[-e Episode Name]* = Video to associate with the Link. Example `-n EP01`\n*<-e Episode Name>* = Episode name to associate with the link\n*<-d Description>* = 480 character Description to associate with the Link and Episode name\n - Already Stored linked will be replaced if duplicated";
+				+ "`\n*[-l Link]* = Youtube Link to serve on request.\n*[-e Episode Name]* = Episode name to associate with the link. Example `-e Teddygozilla`\n*<-e Episode Name>* = Local Video in Database to associate with the Link. Example `-n EP01`\n*<-d Description>* = 480 character Description to associate with the Link and Episode name\n - Recreating already stored links, will just overwrite the associated data";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(
@@ -2521,10 +2498,10 @@ public class UserActivity
 		String name = "deleteLink";
 		String[] aliases = new String[]
 		{};
-		String usage = prefix + name + " [-l Link] [-n Video Name] [-e Episode Name]";
+		String usage = prefix + name + " [<-l Link> or <-n Video Name> or <-e Episode Name>]";
 		String description = ":large_orange_diamond: __VIP__: Delete link to a YouTube video.";
 		String detailedDescription = "Deletes a link from the Database.\nUsage: `" + usage
-				+ "`\n*[-l Link]* = Youtube Link in Database.\n*[-n Video Name]* = Video Name to remove from Database. Example `-n EP01`\n*<-e Episode Name>* = Episode name to remove from Database\n";
+				+ "`\n*<-l Link>* = Youtube Link in Database.\n*<-n Video Name>* = Video Name to remove from Database. Example `-n EP01`\n*<-e Episode Name>* = Episode name to remove from Database\n";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		OptionGroup g1 = new OptionGroup();
@@ -2776,13 +2753,15 @@ public class UserActivity
 				"Use `" + prefix + "cct -t 3` in a Server channel where you will continue initalization **REQUIRED**", false);
 		eb.appendField("2. Check Command Help", "Use `fs!help` in the channel above. You will be referencing it often for the rest of the guide.",
 				false);
-		eb.appendField("3. Set Server Daily Extraction Limit", "Use `fs!ssl..` if you need to reduce usage server wide for some reason", false);
-		eb.appendField("4. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
-		eb.appendField("5. Designate Administrator Roles", "Use `fs!aar...` to give other Discord roles, Frame-Summoner Administrator authority",
+		eb.appendField("3. Check Initial Server Settings", "Use `fs!info -s` to see how the server is currently configured. ", false);
+		eb.appendField("4. Set Server Daily Extraction Limit", "Use `fs!ssl..` if you need to reduce usage server wide for some reason", false);
+		eb.appendField("5. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
+		eb.appendField("6. Designate Administrator Roles", "Use `fs!aar...` to give other Discord roles, Frame-Summoner Administrator authority",
 				false);
-		eb.appendField("6. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal Frame-Summoner usage", false);
-		eb.appendField("7. Designate Channel Permissions",
+		eb.appendField("7. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal Frame-Summoner usage", false);
+		eb.appendField("8. Designate Channel Permissions",
 				"Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
+		eb.appendField("9. Double Check Server Settings", "Use `fs!info -s` to see if there is anything else you want to change. ", false);
 		eb.appendField("Profit", ":moneybag:", false);
 		//Footer content changed at runtime
 		sb.put("init", eb);
@@ -3200,8 +3179,11 @@ public class UserActivity
 		}
 		else
 		{
-			throw new IllegalArgumentException(
-					"Required Flags -n or -s never set! ParseException should have occured or Option Configuration incorrect.");
+			if (ctx.getGuild() == null)
+			{
+				throw new IllegalStateException("Sent in Private Message, parseGuild() Not applicable");
+			}
+			guild = ctx.getGuild();
 		}
 		return guild;
 	}
@@ -3384,11 +3366,12 @@ public class UserActivity
 				{
 					if (temp.startsWith("\""))
 					{
+						temp = temp.substring(1);
 						while (!temp.endsWith("\""))
 						{
 							temp += " " + args.get(++x);
 						}
-						fullArgs.add(temp);
+						fullArgs.add(temp.substring(0, temp.length() - 1));
 					}
 					else
 						fullArgs.add(temp);
@@ -3488,6 +3471,7 @@ public class UserActivity
 
 	private class CommandWrapper
 	{
+
 		private int rank;
 		private String usage;
 		private String description;
