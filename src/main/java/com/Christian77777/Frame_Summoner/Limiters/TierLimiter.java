@@ -4,7 +4,7 @@
 
 package com.Christian77777.Frame_Summoner.Limiters;
 
-import com.Christian77777.Frame_Summoner.Database;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.limiter.Limiter;
 import sx.blah.discord.util.RequestBuffer;

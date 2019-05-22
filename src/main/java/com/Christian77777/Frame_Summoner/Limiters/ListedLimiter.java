@@ -4,7 +4,7 @@
 package com.Christian77777.Frame_Summoner.Limiters;
 
 import java.util.ArrayList;
-import com.Christian77777.Frame_Summoner.Database;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.Christian77777.Frame_Summoner.Database.DBRolePerm;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.limiter.Limiter;

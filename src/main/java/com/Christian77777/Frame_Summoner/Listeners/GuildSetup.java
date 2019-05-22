@@ -12,7 +12,7 @@ import java.util.Properties;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.Christian77777.Frame_Summoner.DRI;
-import com.Christian77777.Frame_Summoner.Database;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.guild.GuildCreateEvent;
 import sx.blah.discord.handle.obj.IChannel;
@@ -129,7 +129,7 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 							+ "\nI am __Frame-Summoner__, a Discord bot that provides access to frames of video content.\nCurrently I acknowledge the `"
 							+ prefix + "` command prefix and have a syntax like `fs!command <arguments>`\nI focus on video content for \""
 							+ prop.getProperty("Content_Name") + "\" and am running on \"" + prop.getProperty("Server_Name")
-							+ "\".\nOn First Join, I am to ignore all commands from users, and all commands in any channel. \nThe first step is for the Server Admins, AKA the users I pinged to do `fs!guide init` in PMs for instructions on unlocking functionality.";
+							+ "\".\nOn First Join, I am to ignore all commands from users, and all commands in any channel. \nThe first step is for the Server Admins, AKA the users I pinged to do `fs!setup` in a #bot-spam like __Server Channel__ for instructions on unlocking functionality.";
 					firstChannel.sendMessage(declaration);
 				}
 				else
@@ -153,7 +153,7 @@ public class GuildSetup implements IListener<GuildCreateEvent>
 							+ "\nI am __Frame-Summoner__, a Discord bot that provide access to frames of video content.\nCurrently I acknowledge the `"
 							+ prefix + "` command prefix and have a syntax like `fs!command <arguments>`\nI focus on video content for \""
 							+ prop.getProperty("Content_Name") + "\" and am running on \"" + prop.getProperty("Server_Name")
-							+ "\".\nOn First Join, I am to ignore all commands from users, and all commands in any channel. \nThe first step is for the Server Admins, AKA the users I pinged to do `fs!guide init` for instructions on unlocking functionality.";
+							+ "\".\nOn First Join, I am to ignore all commands from users, and all commands in any channel. \nThe first step is for the Server Admins, AKA the users I pinged to do `fs!setup` in a #bot-spm like __Server Channel__ for instructions on unlocking functionality.";
 					for (Long l : admins)
 					{
 						event.getClient().getUserByID(l).getOrCreatePMChannel().sendMessage(declaration

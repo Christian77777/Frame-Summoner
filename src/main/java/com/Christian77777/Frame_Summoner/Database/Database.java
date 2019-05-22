@@ -17,7 +17,7 @@
  * along with Frame-Summoner. If not, see <http://www.gnu.org/licenses/>.
  */
 
-package com.Christian77777.Frame_Summoner;
+package com.Christian77777.Frame_Summoner.Database;
 
 import java.io.File;
 import java.net.URISyntaxException;
@@ -60,7 +60,7 @@ public class Database
 			psSetChannelAnnoucementsTrue, psGetVideoList, psSetVideoUsability, psSetVideoRestricted, psSetAllVideosRestricted, psGetUserData,
 			psRecordExtraction, psUpdateUserDailyUsage, psUpdateAllUserDailyUsage, psGetServerUsage, psUpdateServerDailyUsage,
 			psUpdateAllServerDailyUsage, psUpdateServerDailyLimit, psUpdateServerStanding, psSetChannelAnnoucementsFalse, psGetLinkByName,
-			psGetLinkByTitle, psCreateLink, psDeleteLink1, psDeleteLink2, psDeleteLink3, psUpdateOffset, psGetAllChannels;
+			psGetLinkByTitle, psCreateLink, psDeleteLink1, psDeleteLink2, psDeleteLink3, psUpdateOffset, psGetAllChannels, psBanUser, psUnbanUser;
 
 	public static void main(String[] args) throws SQLException
 	{
@@ -140,8 +140,9 @@ public class Database
 			ResultSet rs = stmt.executeQuery("SELECT sqlite_version();");
 			rs.next();
 			logger.info("Current Architecture: {}", OSInfo.getNativeLibFolderPathForCurrentOS());
-			logger.info("Library Version: {}",rs.getString(1));
+			logger.info("Library Version: {}", rs.getString(1));
 			rs.close();
+			runCompatibilityStatements(stmt);
 			generateTablesAndTriggers(stmt);
 			generateStatements();
 			c.commit();
@@ -226,6 +227,8 @@ public class Database
 			psDeleteLink3.close();
 			psUpdateOffset.close();
 			psGetAllChannels.close();
+			psBanUser.close();
+			psUnbanUser.close();
 			c.close();
 			logger.info("Database closed");
 		}
@@ -432,7 +435,7 @@ public class Database
 	 * @param shouldAnnouce if the channel should now be announced in.
 	 * @return if a Channel was updated
 	 */
-	public boolean updateChannelAnnoucement(long channelID, long guildID, boolean shouldAnnouce)
+	public boolean updateChannelAnnouncement(long channelID, long guildID, boolean shouldAnnouce)
 	{
 		boolean result = false;
 		lock.lock();
@@ -502,6 +505,56 @@ public class Database
 			psAddNewVIP.setLong(1, userID);
 			psAddNewVIP.executeUpdate();
 			result = true;
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+
+	/**
+	 * Marks a User as banned in the Database, undos VIP
+	 * NOTE: Resets VIP to false
+	 * @param userID The User's ID
+	 * @return if the User was found
+	 */
+	public boolean banUser(long userID)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psBanUser.setLong(1, userID);
+			psBanUser.executeUpdate();
+			result = true;
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
+
+	/**
+	 * Marks a User as unbanned in Database
+	 * @param userID The User's ID
+	 * @return if the User was found
+	 */
+	public boolean unbanUser(long userID)
+	{
+		boolean result = false;
+		lock.lock();
+		try
+		{
+			psUnbanUser.setLong(1, userID);
+			psUnbanUser.executeUpdate();
+			if (psUnbanUser.getUpdateCount() > 0)
+				return true;
+			else
+				return false;
 		}
 		catch (SQLException e)
 		{
@@ -1091,7 +1144,7 @@ public class Database
 	}
 
 	/**
-	 * Gets a Users Data in the form of a NormalUser object
+	 * Gets a Users Database Data as is, in the form of a NormalUser object
 	 * @param userID the UserID of the User
 	 * @return null if the user does not exist, or a NormalUser object
 	 */
@@ -1389,7 +1442,7 @@ public class Database
 		}
 		catch (SQLException e)
 		{
-			if(e.getMessage().equals("[SQLITE_CONSTRAINT]  Abort due to constraint violation (FOREIGN KEY constraint failed)"))
+			if (e.getMessage().equals("[SQLITE_CONSTRAINT]  Abort due to constraint violation (FOREIGN KEY constraint failed)"))
 				logger.warn("Video not found in Database");
 			else
 				logger.catching(e);
@@ -1526,6 +1579,22 @@ public class Database
 		return result;
 	}
 
+	private void runCompatibilityStatements(Statement stmt) throws SQLException
+	{
+		//Update Database from Version 2.0.0 to 2.1.0``
+		ResultSet rs1 = stmt.executeQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ExtractionRecord';");
+		rs1.next();
+		ResultSet rs2 = stmt.executeQuery("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ArchiveRecord';");
+		rs2.next();
+		if (rs1.getInt(1) == 1 && rs2.getInt(1) == 0)
+		{
+			logger.warn("Updating Database to Frame-Summoner schema 2.1.0");
+			stmt.executeUpdate("DROP TABLE `ExtractionRecord`;");
+		}
+		rs1.close();
+		rs2.close();
+	}
+
 	private void generateTablesAndTriggers(Statement stmt) throws SQLException
 	{
 		//Create Tables
@@ -1534,7 +1603,9 @@ public class Database
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `ChannelPerms` ( `ChannelID` INTEGER NOT NULL UNIQUE, `GuildID` INTEGER NOT NULL, `Permission` INTEGER NOT NULL DEFAULT 0, `Annoucements` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`ChannelID`), FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE )");
 		stmt.executeUpdate(
-				"CREATE TABLE IF NOT EXISTS `ExtractionRecord` ( `Date` INTEGER NOT NULL UNIQUE, `Elevated` INTEGER NOT NULL DEFAULT 0, `UserID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `ChannelID` INTEGER NOT NULL, `MessageID` INTEGER NOT NULL UNIQUE, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `Frame Count` INTEGER, `Url` TEXT NOT NULL, FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE NO ACTION, PRIMARY KEY(`Date`), FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE NO ACTION, FOREIGN KEY(`ChannelID`) REFERENCES `ChannelPerms`(`ChannelID`) ON UPDATE CASCADE ON DELETE NO ACTION, FOREIGN KEY(`UserID`) REFERENCES `UserRecord`(`UserID`) ON UPDATE CASCADE ON DELETE NO ACTION )");
+				"CREATE TABLE IF NOT EXISTS `ExtractionRecord` ( `Date` INTEGER NOT NULL UNIQUE, `Elevated` INTEGER NOT NULL DEFAULT 0, `UserID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `ChannelID` INTEGER NOT NULL, `MessageID` INTEGER NOT NULL UNIQUE, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `Frame Count` INTEGER, `Url` TEXT NOT NULL, FOREIGN KEY(`Filename`) REFERENCES `Videos`(`Filename`) ON UPDATE CASCADE ON DELETE CASCADE, PRIMARY KEY(`Date`), FOREIGN KEY(`GuildID`) REFERENCES `Guilds`(`GuildID`) ON UPDATE CASCADE ON DELETE CASCADE, FOREIGN KEY(`ChannelID`) REFERENCES `ChannelPerms`(`ChannelID`) ON UPDATE CASCADE ON DELETE CASCADE, FOREIGN KEY(`UserID`) REFERENCES `UserRecord`(`UserID`) ON UPDATE CASCADE ON DELETE CASCADE )");
+		stmt.executeUpdate(
+				"CREATE TABLE IF NOT EXISTS `ArchiveRecord` ( `Date` INTEGER NOT NULL UNIQUE, `Elevated` INTEGER NOT NULL DEFAULT 0, `UserID` INTEGER NOT NULL, `GuildID` INTEGER NOT NULL, `ChannelID` INTEGER NOT NULL, `MessageID` INTEGER NOT NULL UNIQUE, `Filename` TEXT NOT NULL, `Timestamp` TEXT NOT NULL, `Frame Count` INTEGER, `Url` TEXT NOT NULL)");
 		stmt.executeUpdate(
 				"CREATE TABLE IF NOT EXISTS `Guilds` ( `GuildID` INTEGER NOT NULL UNIQUE, `RequestLimit` INTEGER NOT NULL DEFAULT 1000, `UsedToday` INTEGER NOT NULL DEFAULT 0, `Enabled` INTEGER NOT NULL DEFAULT 1, `isBlacklist` INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(`GuildID`) )");
 		stmt.executeUpdate(
@@ -1550,6 +1621,8 @@ public class Database
 		//CreateTriggers
 		stmt.executeUpdate(
 				"CREATE TRIGGER IF NOT EXISTS AutoAddExtractionRecordUser BEFORE INSERT ON `ExtractionRecord` BEGIN INSERT INTO UserRecord VALUES(NEW.UserID,1,1,0,0) ON CONFLICT (`UserID`) DO UPDATE SET `TimesUsed` = `TimesUsed` + 1, `UsedToday` = `UsedToday` + 1; UPDATE `Guilds` SET `UsedToday` = `UsedToday` + 1 WHERE NEW.Elevated = 0 AND `GuildID` = NEW.GuildID;END");
+		stmt.executeUpdate(
+				"CREATE TRIGGER IF NOT EXISTS AutoArchiveExtraction AFTER DELETE ON `ExtractionRecord` BEGIN INSERT INTO ArchiveRecord VALUES(OLD.Date, OLD.Elevated, OLD.UserID, OLD.GuildID, OLD.ChannelID, OLD.MessageID, OLD.Filename, OLD.Timestamp, OLD.`Frame Count`, OLD.Url);END");
 		stmt.executeUpdate(
 				"CREATE TRIGGER IF NOT EXISTS AutoDisableDeletedVideo BEFORE DELETE ON `Videos` BEGIN UPDATE `Moments` SET `Disabled` = 1 WHERE 'Nickname' = OLD.Nickname; UPDATE `Links` SET `Usable` = 0 WHERE `Nickname` = OLD.Nickname; END");
 		stmt.executeUpdate(
@@ -1621,263 +1694,8 @@ public class Database
 		psDeleteLink2 = c.prepareStatement("DELETE FROM `Links` WHERE `Nickname` = ?");
 		psDeleteLink3 = c.prepareStatement("DELETE FROM `Links` WHERE `Title` = ?");
 		psUpdateOffset = c.prepareStatement("UPDATE `Videos` SET `Offset` = ? WHERE `Nickname` = ?;");
-	}
-
-	public class DBChannel
-	{
-
-		private long id;
-		private int tier;
-		private boolean annoucement;
-
-		private DBChannel(long id, int tier, boolean annoucement)
-		{
-			this.id = id;
-			this.tier = tier;
-			this.annoucement = annoucement;
-		}
-
-		public long getId()
-		{
-			return id;
-		}
-
-		public int getTier()
-		{
-			return tier;
-		}
-
-		public boolean isAnnoucement()
-		{
-			return annoucement;
-		}
-	}
-
-	public class DBNormalUser
-	{
-
-		private long id;
-		private int totalUsed;
-		private int usedToday;
-		private boolean banned;
-		private boolean vip;
-
-		public DBNormalUser(long id)
-		{
-			this.id = id;
-			totalUsed = 0;
-			usedToday = 0;
-			banned = false;
-			vip = false;
-		}
-
-		private DBNormalUser(long id, int totalUsed, int usedToday, boolean banned, boolean vip)
-		{
-			this.id = id;
-			this.totalUsed = totalUsed;
-			this.usedToday = usedToday;
-			this.banned = banned;
-			this.vip = vip;
-		}
-
-		public long getId()
-		{
-			return id;
-		}
-
-		public int getTotalUsed()
-		{
-			return totalUsed;
-		}
-
-		public int getUsedToday()
-		{
-			return usedToday;
-		}
-
-		public boolean isBanned()
-		{
-			return banned;
-		}
-
-		public boolean isVip()
-		{
-			return vip;
-		}
-	}
-
-	public class DBRolePerm
-	{
-
-		private long roleID;
-		private boolean blackVSwhite;
-
-		private DBRolePerm(long roleID, boolean blackVSwhite)
-		{
-			this.roleID = roleID;
-			this.blackVSwhite = blackVSwhite;
-		}
-
-		public long getRoleID()
-		{
-			return roleID;
-		}
-
-		public boolean getBlackVSWhite()
-		{
-			return blackVSwhite;
-		}
-	}
-
-	public class DBVideo
-	{
-
-		private String filename;
-		private String nickname;
-		private long length;
-		private long offset;
-		private String fps;
-		private boolean restricted;
-		private boolean usable;
-		private boolean linked;
-
-		private DBVideo(String f, String n, long l, long o, String s, boolean r, boolean u, boolean li)
-		{
-			filename = f;
-			nickname = n;
-			length = l;
-			offset = o;
-			fps = s;
-			restricted = r;
-			usable = u;
-			linked = li;
-		}
-
-		public String getFilename()
-		{
-			return filename;
-		}
-
-		public String getNickname()
-		{
-			return nickname;
-		}
-
-		public long getLength()
-		{
-			return length;
-		}
-
-		public long getOffset()
-		{
-			return offset;
-		}
-
-		public String getFps()
-		{
-			return fps;
-		}
-
-		public boolean isRestricted()
-		{
-			return restricted;
-		}
-
-		public boolean isUsable()
-		{
-			return usable;
-		}
-
-		public boolean isLinked()
-		{
-			return linked;
-		}
-		
-		public String toString()
-		{
-			return filename;
-		}
-	}
-
-	public class DBGuild
-	{
-
-		private long guildID;
-		private int requestLimit;
-		private int usedToday;
-		private boolean enabled;
-		private boolean isBlacklistMode;
-
-		private DBGuild(long g, int r, int u, boolean e, boolean b)
-		{
-			guildID = g;
-			requestLimit = r;
-			usedToday = u;
-			enabled = e;
-			isBlacklistMode = b;
-		}
-
-		public long getGuildID()
-		{
-			return guildID;
-		}
-
-		public int getRequestLimit()
-		{
-			return requestLimit;
-		}
-
-		public int getUsedToday()
-		{
-			return usedToday;
-		}
-
-		public boolean isEnabled()
-		{
-			return enabled;
-		}
-
-		public boolean isBlacklistMode()
-		{
-			return isBlacklistMode;
-		}
-
-	}
-
-	public class DBLink
-	{
-
-		private String link;
-		private String title;
-		private String description;
-		private String nickname;
-
-		private DBLink(String l, String t, String d, String n)
-		{
-			link = l;
-			title = t;
-			description = d;
-			nickname = n;
-		}
-
-		public String getLink()
-		{
-			return link;
-		}
-
-		public String getTitle()
-		{
-			return title;
-		}
-
-		public String getDescription()
-		{
-			return description;
-		}
-
-		public String getNickname()
-		{
-			return nickname;
-		}
+		psBanUser = c.prepareStatement(
+				"INSERT INTO `UserRecord` (`UserID`,`TimesUsed`,`UsedToday`,`GlobalBan`,`VIP`) VALUES(?,0,0,1,0) ON CONFLICT(`UserID`) DO UPDATE SET `GlobalBan` = 1, `VIP` = 0;");
+		psUnbanUser = c.prepareStatement("UPDATE `UserRecord` SET `GlobalBan` = 0 WHERE `UserID` = ?;");
 	}
 }
