@@ -41,7 +41,9 @@ import org.apache.logging.log4j.Logger;
 import com.Christian77777.Frame_Summoner.Database.DBChannel;
 import com.Christian77777.Frame_Summoner.Database.DBGuild;
 import com.Christian77777.Frame_Summoner.Database.DBLink;
+import com.Christian77777.Frame_Summoner.Database.DBNormalUser;
 import com.Christian77777.Frame_Summoner.Database.DBVideo;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.Christian77777.Frame_Summoner.Limiters.AdminLimiter;
 import com.Christian77777.Frame_Summoner.Limiters.ListedLimiter;
 import com.Christian77777.Frame_Summoner.Limiters.TierLimiter;
@@ -53,7 +55,6 @@ import com.darichey.discord.CommandRegistry;
 import com.darichey.discord.limiter.Limiter;
 import com.darichey.discord.limiter.UserLimiter;
 import sx.blah.discord.api.IDiscordClient;
-import sx.blah.discord.api.internal.json.objects.EmbedObject;
 import sx.blah.discord.handle.impl.obj.ReactionEmoji;
 import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IGuild;
@@ -158,6 +159,10 @@ public class UserActivity
 		{ tier3L, vipL });
 		addSetOffsetCommand(2, new Limiter[]
 		{ tier3L, vipL });
+		addBanUserCommand(2, new Limiter[]
+		{ tier3L, vipL });
+		addUnbanUserCommand(2, new Limiter[]
+		{ tier3L, vipL });
 		//Admin Commands
 		addNewAdminRoleCommand(1, new Limiter[]
 		{ tier3L, adminL });
@@ -170,11 +175,13 @@ public class UserActivity
 		addChangeListingModeCommand(1, new Limiter[]
 		{ tier3L, adminL });
 		addChangeChannelTierCommand(1, new Limiter[]
-		{ privateAdminL });//Allowed in PMs, Admin Check must be done in program if Private Channel
-		addChangeChannelAnnoucementCommand(1, new Limiter[]
+		{ privateAdminL });//Allowed in PMs, Admin Check must be done in command if Private Channel
+		addChangeChannelAnnouncementCommand(1, new Limiter[]
 		{ tier3L, adminL });
 		addSetServerLimit(1, new Limiter[]
 		{ tier3L, adminL });
+		addSetupCommand(1, new Limiter[]
+		{ adminL });
 		//Extraction Commands
 		addFrameCommand(0, new Limiter[]
 		{ tier2L, listedL });
@@ -182,14 +189,16 @@ public class UserActivity
 		addListCommand(0, new Limiter[]
 		{ tier2L, listedL });
 		addFetchLinkCommand(0, new Limiter[]
-		{ tier1L, listedL });
+		{ tier2L, listedL });
 		//Generic Commands
-		addInfoCommand(0, new Limiter[]
-		{ tier1L, listedL });
+		addInfoCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 0
+		{});
 		addGuideCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 0
 		{});
-		addHelpCommand(0, new Limiter[]
-		{ tier1L, listedL });
+		addHelpCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 0
+		{});
+		addCommandsCommand(0, new Limiter[]//Fallback to PM if Channel is Tier 0
+		{});
 	}
 
 	private void addDebugCommand()
@@ -380,8 +389,8 @@ public class UserActivity
 		String usage = prefix + name + " <-f Frame Number> <-o> [Filename] [Timecode]";
 		String description = "Extracts frame from video and uploads to Discord";
 		String detailedDescription = "Extracts a Frame from specified video at the timecode and uploads it to Discord if authorized.\nUsage: `"
-				+ usage
-				+ "`\n*[Filename]* = Name of Video file validated in Database, use fs!list to see avaliable files\n*[Timecode]* = Timecode specifying which frame to extract, in this format `##:##:##.###`, hours, minutes, milliseconds optional\n*<-f Frame Number>* = Increment the frame selected by the timecode, easier way to be precise.\n*<-o>* = Ignore video link offset. __Advanced__\n - Several Restrictions on command to prevent abuse";
+				+ usage + "`\n*[Filename]* = Name of Video file validated in Database, use " + prefix
+				+ "list to see avaliable files\n*[Timecode]* = Timecode specifying which frame to extract, in this format `##:##:##.###`, hours, minutes, milliseconds optional\n*<-f Frame Number>* = Increment the frame selected by the timecode, easier way to be precise.\n*<-o>* = Ignore video link offset. __Advanced__\n - Several Restrictions on command to prevent abuse";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("o").desc("Ignores Preset Offset when used").longOpt("offset").build());
@@ -423,12 +432,12 @@ public class UserActivity
 							});
 							return;
 						}
-						long timecheck = Extractor.convertTimeToMilli(required[1], null, null);
 						extractor.requestFrame(ctx, required[0], required[1], frameCount, !ignoreOffset);
 					}
 					else if (required.length > 2)
 					{
-						final String response = ":octagonal_sign: Too many unmarked arguments! Arguments past: `" + required[1] + "` causing error. Flags may only come before unmarked arguments\nDo `" + prefix + "help` frame for proper usage";
+						final String response = ":octagonal_sign: Too many unmarked arguments! Arguments past: `" + required[1]
+								+ "` causing error. Flags may only come before unmarked arguments\nDo `" + prefix + "command` frame for proper usage";
 						RequestBuffer.request(() -> {
 							ctx.getChannel().sendMessage(response);
 						});
@@ -436,7 +445,7 @@ public class UserActivity
 					else
 					{
 						RequestBuffer.request(() -> {
-							ctx.getChannel().sendMessage(":octagonal_sign: Not Enough Arguments! Do " + prefix + "help frame for proper usage");
+							ctx.getChannel().sendMessage(":octagonal_sign: Not Enough Arguments! Do " + prefix + "command frame for proper usage");
 						});
 					}
 				}
@@ -569,7 +578,7 @@ public class UserActivity
 			if (args.size() > 0)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do " + prefix + "help frame for proper usage");
+					ctx.getChannel().sendMessage("Too Many Arguments! Do " + prefix + "command frame for proper usage");
 				});
 				return;
 			}
@@ -600,12 +609,152 @@ public class UserActivity
 			if (args.size() > 0)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do " + prefix + "help frame for proper usage");
+					ctx.getChannel().sendMessage("Too Many Arguments! Do " + prefix + "command frame for proper usage");
 				});
 				return;
 			}
 			if (confirmAction(ctx, "Would you like to temporarly Disable the Extractor and begin Verification?"))
 				extractor.beginVerifications(ctx.getChannel());
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addBanUserCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "banUser";
+		String[] aliases = new String[]
+		{ "bu", "ban" };
+		String usage = prefix + name + " [<-n Username> or <-s SnowflakeID>]";
+		String description = ":large_orange_diamond: __VIP__: Bans a User from executing actions with bot.";
+		String detailedDescription = "Prevents a User from extracting frames indefinitely\nUsage: `" + usage
+				+ "`\n*[<-n Username> or <-s SnowflakeID>]* = Identify the User account to be marked by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("Username").desc("Name of Discord User without Discriminator").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord User").hasArg().longOpt("snowflake").build());
+		g1.setRequired(true);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					IUser user = parseUser(ctx, line);
+					if (user != null)
+					{
+						if (db.banUser(user.getLongID()))
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(user.mention() + " has been Banned from Extracting :x:");
+							});
+						else
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(":radioactive: Error with Execution");
+							});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "command " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addUnbanUserCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "unbanUser";
+		String[] aliases = new String[]
+		{ "ubu", "pardon" };
+		String usage = prefix + name + " [<-n Username> or <-s SnowflakeID>]";
+		String description = ":large_orange_diamond: __VIP__: Pardons a User from global bans";
+		String detailedDescription = "Allows a User to extract frames again\nUsage: `" + usage
+				+ "`\n*[<-n Username> or <-s SnowflakeID>]* = Identify the User account to be marked by Name or Snowflake ID as declared by flag. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__";
+		detailedDescription += appendAliases(aliases);
+		Options options = new Options();
+		OptionGroup g1 = new OptionGroup();
+		g1.addOption(Option.builder("n").argName("Username").desc("Name of Discord User without Discriminator").hasArg().longOpt("name").build());
+		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord User").hasArg().longOpt("snowflake").build());
+		g1.setRequired(true);
+		options.addOptionGroup(g1);
+		Command command = b.onCalled(ctx -> {
+			try
+			{
+				String[] result = assembleArguments(ctx.getArgs());
+				CommandLine line = new DefaultParser().parse(options, result, false);
+				String[] extraArgs = line.getArgs();
+				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
+				{
+					IUser user = parseUser(ctx, line);
+					if (user != null)
+					{
+						if (db.unbanUser(user.getLongID()))
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage(user.mention() + " has been Pardoned :o:");
+							});
+						else
+							RequestBuffer.request(() -> {
+								ctx.getChannel().sendMessage("User was not found!");
+							});
+					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
+								+ prefix + "command " + name + "` for proper Usage");
+					});
+				}
+			}
+			catch (IllegalArgumentException e)
+			{
+				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
+				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(response);
+				});
+			}
+			catch (ParseException e)
+			{
+				handleParseException(ctx.getChannel(), e, name);
+			}
+			catch (Exception e)
+			{
+				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
+				logger.error(errorMessage, e);
+			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
 		registry.register(command, name, aliases);
@@ -716,12 +865,11 @@ public class UserActivity
 		{ "pauseServer" };
 		String usage = prefix + name + " <-u> <<-n GuildName> or <-s SnowflakeID>>";
 		String description = ":large_orange_diamond: __VIP__: Disable a Server's access to Frame Extractions";
-		String detailedDescription = "Changes the number of extractions executed by a Server today. Useful for giving some Servers more extractions. \nUsage: `"
-				+ usage
-				+ "`\n*[-u number]* = The new number of times the User used the bot today\n*<<-n GuildName> or <-s SnowflakeID>>* = Identify the User account to be added by Name or Snowflake ID as declared by flag. Otherwise the current server is affected. Example `-n Wumpus` or `-s 389021830`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
+		String detailedDescription = "VIP Command to prevent an entire server from extracting Frames indefinitely. \nUsage: `" + usage
+				+ "`\n*<-u>* = Reenables a Server instead\n*<<-n GuildName> or <-s SnowflakeID>>* = Identify the Guild to be affected by Name or Snowflake ID as declared by flag. Otherwise the current server is affected. Example `-n ServerA` or `-s 0123456789`\n:large_orange_diamond: __VIP only__\n - VIPs are always immune to this restriction";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
-		options.addOption(Option.builder("u").desc("New Daily Extraction Limit.").hasArg(false).longOpt("undo").build());
+		options.addOption(Option.builder("u").desc("Undo action").hasArg(false).longOpt("undo").build());
 		OptionGroup g1 = new OptionGroup();
 		g1.addOption(Option.builder("n").argName("GuildName").desc("Name of the Guild").hasArg().longOpt("name").build());
 		g1.addOption(Option.builder("s").argName("SnowflakeID").desc("Snowflake ID of the Discord Object").hasArg().longOpt("snowflake").build());
@@ -755,6 +903,12 @@ public class UserActivity
 							});
 						}
 					}
+				}
+				else
+				{
+					RequestBuffer.request(() -> {
+						ctx.getChannel().sendMessage("No Guild was found");
+					});
 				}
 			}
 			catch (IllegalArgumentException e)
@@ -1099,7 +1253,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1135,8 +1289,8 @@ public class UserActivity
 		String usage = prefix + name + " [-n Video Name]";
 		String description = ":large_orange_diamond: __VIP__: Completely removes a video from the Database";
 		String detailedDescription = "Removes a video from the database, and disassociates dependent data. Only way to remove unusable entries. Extraction Record is untouched.\nUsage: `"
-				+ usage
-				+ "`\n*[-n Video Name]* = Identify the Video to remove, use `fs!list` to see what can be removed\n:large_orange_diamond: __VIP only__\n:warning: Requires Confirmation since data will be potentially removed.";
+				+ usage + "`\n*[-n Video Name]* = Identify the Video to remove, use `" + prefix
+				+ "list` to see what can be removed\n:large_orange_diamond: __VIP only__\n:warning: Requires Confirmation since data will be potentially removed.";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(
@@ -1170,7 +1324,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1369,7 +1523,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1407,8 +1561,8 @@ public class UserActivity
 		{ "directory" };
 		String usage = prefix + name + " [\"Directory Path\"]";
 		String description = ":customs: __Operator__: Change the Directory of Videos to extract from";
-		String detailedDescription = "Changes the Video Directory the bot monitors.\nUsage: `" + prefix
-				+ "dir [\"Directory Path\"]`\n*[\"Directory Path\"]* = Path of Directory with videos to extract from, use quotation marks around path names with spaces if necessary.\n:customs: __Operator only__\n - Command can be completely disabled in config\n - Forces Bot Reboot directly after";
+		String detailedDescription = "Changes the Video Directory the bot monitors.\nUsage: `" + usage
+				+ "`\n*[\"Directory Path\"]* = Path of Directory with videos to extract from, use quotation marks around path names with spaces if necessary.\n:customs: __Operator only__\n - Command can be completely disabled in config\n - Forces Bot Reboot directly after";
 		detailedDescription += appendAliases(aliases);
 		Command command = b.onCalled(ctx -> {
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
@@ -1470,19 +1624,29 @@ public class UserActivity
 		String name = "info";
 		String[] aliases = new String[]
 		{ "information" };
-		String usage = prefix + name;
-		String description = "Display Info about the bot";
-		String detailedDescription = "Provides Generic information about this Discord bot\nUsage: `" + usage + "'";
+		String usage = prefix + name + " <-b> or <-s> or <-u>";
+		String description = "Display Info about various things";
+		String detailedDescription = "Provides Frame-Summoner related information about this Discord bot, or Discord Server, or Discord User \nUsage: `"
+				+ usage
+				+ "`\n*<-b>* = Displays Information about Bot\n*<-s>* = Displays Information about Server\n*<-u <Snowflake or Name>>* = Displays Information about User. If you want information about another user, append their Snowflake or Name as an argument. Example `-u` or `-u 1234567890` or `-u Wumpus`";
 		detailedDescription += appendAliases(aliases);
+
 		Options options = new Options();
+
 		OptionGroup g1 = new OptionGroup();
 		g1.addOption(Option.builder("s").desc("Shows Info about this Server").hasArg(false).longOpt("server").build());
-		g1.addOption(
-				Option.builder("u").desc("Shows Info about the current user's standing with Frame-Summoner").hasArg(false).longOpt("user").build());
+		g1.addOption(Option.builder("u").desc("Shows Info about the current user's standing with Frame-Summoner").hasArg(true).optionalArg(true)
+				.longOpt("user").build());
 		g1.addOption(Option.builder("b").desc("Shows Info about Frame-Summoner").hasArg(false).longOpt("bot").build());
-		g1.setRequired(true);
+		g1.setRequired(false);
 		options.addOptionGroup(g1);
+
 		Command command = b.onCalled(ctx -> {
+			final IChannel location;
+			if (db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				location = ctx.getChannel();
+			else
+				location = ctx.getAuthor().getOrCreatePMChannel();
 			try
 			{
 				String[] result = assembleArguments(ctx.getArgs());
@@ -1492,109 +1656,215 @@ public class UserActivity
 				{
 					if (line.hasOption('s'))
 					{
+						if (location.isPrivate())
+						{
+							RequestBuffer.request(() -> {
+								location.sendMessage("Information about Servers unavaliable when in Private Messages");
+							});
+						}
+						else
+						{
+							ArrayList<String> textTitle = new ArrayList<String>();
+							ArrayList<String> textValue = new ArrayList<String>();
+							ArrayList<Boolean> inline = new ArrayList<Boolean>();
+							//Field Titles: 50
+							//Field Values: 175
+							DBGuild g = db.getServerData(ctx.getGuild().getLongID());
+							String mode = g.isBlacklistMode() ? ":black_large_square: Blacklist" : ":white_large_square: Whitelist";
+							textTitle.add("Operating Mode");
+							textValue.add(g.isEnabled() ? ":large_blue_circle: Online" : ":red_circle: Offline");
+							inline.add(true);
+							textTitle.add("Role Listing Mode");
+							textValue.add(mode);
+							inline.add(true);
+							textTitle.add("Daily Server Request Limit");
+							String max = g.getRequestLimit() == Integer.valueOf(prop.getProperty("MaxServerExtracts")) ? ":arrow_up: " : "";
+							textValue.add(max + g.getRequestLimit() + " requests");
+							inline.add(true);
+							textTitle.add("Today's Extraction Total");
+							max = g.getRequestLimit() == g.getUsedToday() ? ":arrow_up: " : "";
+							textValue.add(max + g.getUsedToday() + " requests");
+							inline.add(true);
+							textTitle.add(String.valueOf('\u200B'));
+							textValue.add(String.valueOf('\u200B'));
+							inline.add(false);
+							String word = new String("");
+							for (Long l : db.getListOfAdminRoles(ctx.getGuild().getLongID()))
+							{
+								word += ctx.getGuild().getRoleByID(l).getName() + "\n";
+							}
+							word = word.length() == 0 ? "<" + ctx.getGuild().getOwner().mention() + ">" : word.substring(0, word.length() - 1);
+							textTitle.add(":a: Administrator Roles");
+							textValue.add(word);
+							inline.add(true);
+							word = new String("");
+							for (Long l : db.getListOfUserRoles(ctx.getGuild().getLongID()))
+							{
+								word += ctx.getGuild().getRoleByID(l).getName() + "\n";
+							}
+							word = word.length() == 0 ? (":small_red_triangle_down:") : word.substring(0, word.length() - 1);
+							textTitle.add(mode + "ed Roles");
+							textValue.add(word);
+							inline.add(true);
+							textTitle.add(String.valueOf('\u200B'));
+							textValue.add(String.valueOf('\u200B'));
+							inline.add(false);
+							String tier3 = "";
+							String tier2 = "";
+							String tier1 = "";
+							for (DBChannel c : db.getServerChannels(ctx.getGuild().getLongID()))
+							{
+								switch (c.getTier())
+								{
+									case 3:
+										tier3 += ctx.getClient().getChannelByID(c.getId()).getName() + "\n";
+										break;
+									case 2:
+										tier2 += ctx.getClient().getChannelByID(c.getId()).getName() + "\n";
+										break;
+									case 1:
+										tier1 += ctx.getClient().getChannelByID(c.getId()).getName() + "\n";
+										break;
+									default:
+										break;
+								}
+							}
+							tier3 = tier3.length() == 0 ? ":small_red_triangle_down:" : tier3.substring(0, tier3.length() - 1);
+							tier2 = tier2.length() == 0 ? ":small_red_triangle_down:" : tier2.substring(0, tier2.length() - 1);
+							tier1 = tier1.length() == 0 ? ":small_red_triangle_down:" : tier1.substring(0, tier1.length() - 1);
+							tier3 = tier3.length() >= 300 ? tier3.substring(0, 297) + "..." : tier3;
+							tier2 = tier2.length() >= 300 ? tier2.substring(0, 297) + "..." : tier2;
+							tier1 = tier1.length() >= 300 ? tier1.substring(0, 297) + "..." : tier1;
+							textTitle.add(":a: Admin Channels");
+							textValue.add(tier3);
+							inline.add(true);
+							textTitle.add(":asterisk: Full Usage Channels");
+							textValue.add(tier2);
+							inline.add(true);
+							textTitle.add(":information_source: Info Only Channels");
+							textValue.add(tier1);
+							inline.add(true);
+							sendEmbedList(ctx, location, new Color(0, 255, 0), ctx.getGuild().getName() + " Frame-Summoner Configuration",
+									"List all Information regarding this server", ctx.getGuild().getIconURL(), textTitle, textValue, inline, null);
+						}
+					}
+					else if (line.hasOption('u'))
+					{
 						ArrayList<String> textTitle = new ArrayList<String>();
 						ArrayList<String> textValue = new ArrayList<String>();
 						ArrayList<Boolean> inline = new ArrayList<Boolean>();
 						//Field Titles: 50
 						//Field Values: 175
-						DBGuild g = db.getServerData(ctx.getGuild().getLongID());
-						String mode = g.isBlacklistMode() ? ":black_large_square: Blacklist" : ":white_large_square: Whitelist";
-						textTitle.add("Operating Mode");
-						textValue.add(g.isEnabled() ? ":large_blue_circle: Online" : ":red_circle: Offline");
-						inline.add(true);
-						textTitle.add("Role Listing Mode");
-						textValue.add(mode);
-						inline.add(true);
-						textTitle.add("Daily Server Request Limit");
-						String max = g.getRequestLimit() == Integer.valueOf(prop.getProperty("MaxServerExtracts")) ? ":arrow_up: " : "";
-						textValue.add(max + g.getRequestLimit() + " requests");
-						inline.add(true);
-						textTitle.add("Today's Extraction Total");
-						max = g.getRequestLimit() == g.getUsedToday() ? ":arrow_up: " : "";
-						textValue.add(max + g.getUsedToday() + " requests");
-						inline.add(true);
-						textTitle.add(String.valueOf('\u200B'));
-						textValue.add(String.valueOf('\u200B'));
-						inline.add(false);
-						String word = new String("");
-						for (Long l : db.getListOfAdminRoles(ctx.getGuild().getLongID()))
+						DBNormalUser user;
+						IUser iU;
+						if (line.getOptionValue('u') != null)
 						{
-							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
-						}
-						word = word.length() == 0 ? "<" + ctx.getGuild().getOwner().mention() + ">" : word.substring(0, word.length() - 1);
-						textTitle.add(":a: Administrator Roles");
-						textValue.add(word);
-						inline.add(true);
-						word = new String("");
-						for (Long l : db.getListOfUserRoles(ctx.getGuild().getLongID()))
-						{
-							word += ctx.getGuild().getRoleByID(l).getName() + "\n";
-						}
-						word = word.length() == 0 ? (":small_red_triangle_down:") : word.substring(0, word.length() - 1);
-						textTitle.add(mode + "ed Roles");
-						textValue.add(word);
-						inline.add(true);
-						textTitle.add(String.valueOf('\u200B'));
-						textValue.add(String.valueOf('\u200B'));
-						inline.add(false);
-						String tier3 = "";
-						String tier2 = "";
-						String tier1 = "";
-						for (DBChannel c : db.getServerChannels(ctx.getGuild().getLongID()))
-						{
-							switch (c.getTier())
+							try
 							{
-								case 3:
-									tier3 += ctx.getClient().getChannelByID(c.getId()).getName() + "\n";
-									break;
-								case 2:
-									tier2 += ctx.getClient().getChannelByID(c.getId()).getName() + "\n";
-									break;
-								case 1:
-									tier1 += ctx.getClient().getChannelByID(c.getId()).getName() + "\n";
-									break;
-								default:
-									break;
+								iU = parseUser(ctx, Long.valueOf(line.getOptionValue('u')));
+								if (iU == null)//User has a Long as a name, for SOME reason
+									iU = parseUser(ctx, line.getOptionValue('u'));
 							}
+							catch (NumberFormatException e)
+							{
+								iU = parseUser(ctx, line.getOptionValue('u'));
+							}
+							user = db.getUserUsage(iU.getLongID());
 						}
-						tier3 = tier3.length() == 0 ? ":small_red_triangle_down:" : tier3.substring(0, tier3.length() - 1);
-						tier2 = tier2.length() == 0 ? ":small_red_triangle_down:" : tier2.substring(0, tier2.length() - 1);
-						tier1 = tier1.length() == 0 ? ":small_red_triangle_down:" : tier1.substring(0, tier1.length() - 1);
-						tier3 = tier3.length() >= 300 ? tier3.substring(0, 297) + "..." : tier3;
-						tier2 = tier2.length() >= 300 ? tier2.substring(0, 297) + "..." : tier2;
-						tier1 = tier1.length() >= 300 ? tier1.substring(0, 297) + "..." : tier1;
-						textTitle.add(":a: Admin Channels");
-						textValue.add(tier3);
+						else
+						{
+							iU = ctx.getAuthor();
+							user = db.getUserUsage(ctx.getAuthor().getLongID());
+						}
+						if (user == null)//Default User
+							user = new DBNormalUser(iU.getLongID());
+						//Get Bot Authority Information
+						String bAuthority;
+						boolean operator = prop.getProperty("Bot_Manager").equals(String.valueOf(user.getId()));
+						boolean vip = user.isVip();
+						if (operator)
+							bAuthority = ":customs: Operator";
+						else if (vip)
+							bAuthority = ":large_orange_diamond: VIP";
+						else
+							bAuthority = "None";
+						textTitle.add("Bot Authority");
+						textValue.add(bAuthority);
 						inline.add(true);
-						textTitle.add(":loud_sound: Full Usage Channels");
-						textValue.add(tier2);
+						//Get Server Authority Information
+						String sAuthority;
+						if (!location.isPrivate() && AdminLimiter.checkServerOwner(ctx.getGuild(), iU))
+							sAuthority = ":a: Server Owner";
+						else if (!location.isPrivate() && AdminLimiter.checkAdmin(db, ctx.getGuild(), iU))
+							sAuthority = ":a: Admin";
+						else
+							sAuthority = "None";
+						textTitle.add("Server Authority");
+						textValue.add(sAuthority);
 						inline.add(true);
-						textTitle.add(":information_source: Info Only Channels");
-						textValue.add(tier1);
+						//Get Global Extraction Standing
+						textTitle.add("Global Extraction Standing");
+						textValue.add(user.isBanned() ? ":no_entry: Banned" : "Good");
+						inline.add(false);
+						//Get Today's Extraction Count
+						textTitle.add("Today's Extraction Count");
+						if (operator || vip)
+						{
+							textValue.add(user.getUsedToday() + " :large_orange_diamond:");
+						}
+						else
+						{
+							int max = Integer.parseInt(prop.getProperty("MaxUserExtracts"));
+							textValue.add((user.getUsedToday() == max ? ":arrow_up: " : "") + user.getUsedToday() + "/" + max);
+						}
 						inline.add(true);
-						sendEmbedList(ctx, new Color(0, 255, 0), ctx.getGuild().getName() + " Frame-Summoner Configuration",
-								"List all Information regarding this server", ctx.getGuild().getIconURL(), textTitle, textValue, inline, null);
-					}
-					else if (line.hasOption('u'))
-					{
-
+						//Get Over Extraction Count
+						textTitle.add("Overall Extraction Total");
+						textValue.add(String.valueOf(user.getTotalUsed()));
+						inline.add(true);
+						//Get Server Extraction Standing
+						textTitle.add("Server Extraction Standing");
+						if (!location.isPrivate())
+						{
+							DBGuild guild = db.getServerData(ctx.getGuild().getLongID());
+							if (guild.isBlacklistMode())
+								textValue.add("Normal");
+							else
+								textValue.add("Whitelisted");
+						}
+						else
+							textValue.add("N/A");
+						inline.add(false);
+						sendEmbedList(ctx, location, new Color(0, 0, 255), iU.getName() + " Frame-Summoner Standing",
+								"List all Information regarding this User", iU.getAvatarURL(), textTitle, textValue, inline, null);
 					}
 					else if (line.hasOption('b'))
 					{
 						RequestBuffer.request(() -> {
-							ctx.getChannel()
-									.sendMessage("- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n"
+							location.sendMessage(
+									"__Frame-Summoner Discord Bot__\nThis bot is for the purpose of serving Image Frames of Locally kept videos to the Discord Population automatically.\nUseful if simply giving out video is a problem.\n- **Content Avaliable:** "
+											+ prop.getProperty("Content_Name") + "\n- **Bot Operator:** "
+											+ ctx.getClient().getUserByID(Long.valueOf(prop.getProperty("Bot_Manager"))).getName()
+											+ "\n\n- **Version:** " + DRI.version + "\n- **Author:** Christian77777\n"
 											+ "- **Programming Language:** Java\n" + "- **Discord Connection Library:** Discord4J\n"
-											+ "- **Discord (Command) Library:** Commands4J");
+											+ "- **Discord (Command) Library:** Commands4J"
+											+ "\n- **Github:** https://github.com/Christian77777/Frame-Summoner");
+						});
+					}
+					else
+					{
+						RequestBuffer.request(() -> {
+							location.sendMessage(
+									"Whoa, I can display a bunch of info, can you be more specific?\n```\n-b = Info about the bot\n-s = Info about the Current Server\n-u = Info about the current User\n     For info about other users, append their Snowflake or Name to the end of '-u'\n```");
 						});
 					}
 				}
 				else
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
+						location.sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1603,12 +1873,12 @@ public class UserActivity
 				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
 				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(response);
+					location.sendMessage(response);
 				});
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx.getChannel(), e, name);
+				handleParseException(location, e, name);
 			}
 			catch (Exception e)
 			{
@@ -1664,7 +1934,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1734,7 +2004,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1804,7 +2074,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1874,7 +2144,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -1951,7 +2221,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2026,7 +2296,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2071,7 +2341,7 @@ public class UserActivity
 			if (args.size() > 0)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments! Do `" + prefix + "help changeListingMode` for proper usage");
+					ctx.getChannel().sendMessage("Too Many Arguments! Do `" + prefix + "command changeListingMode` for proper usage");
 				});
 				return;
 			}
@@ -2166,7 +2436,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2193,18 +2463,18 @@ public class UserActivity
 		registry.register(command, name, aliases);
 	}
 
-	private void addChangeChannelAnnoucementCommand(int commandTier, Limiter[] limits)
+	private void addChangeChannelAnnouncementCommand(int commandTier, Limiter[] limits)
 	{
 		Builder b = Command.builder();
 		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
-		String name = "changeChannelAnnoucement";
+		String name = "changeChannelAnnouncement";
 		String[] aliases = new String[]
-		{ "cca", "updateChannelAnnoucement", "uca" };
+		{ "cca", "updateChannelAnnouncement", "uca" };
 		String usage = prefix + name + " <-u> <<-n ChannelName> or <-s SnowflakeID>>";
-		String description = ":a: __Admin__: Designate channel as Annoucement Channel.";
-		String detailedDescription = "Toggle channel as annoucement channel. These channels occasionally will get status messages like `Bot online` and such\nUsage: `"
+		String description = ":a: __Admin__: Designate channel as Announcement Channel.";
+		String detailedDescription = "Toggle channel as announcement channel. These channels occasionally will get status messages like `Bot online` and such\nUsage: `"
 				+ usage
-				+ "`\n*<-u>* = Inverts Command to clear Annoucement status\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 123456789`\n:a: __Admin only__";
+				+ "`\n*<-u>* = Inverts Command to clear Announcement status\n*<<-n ChannelName> or <-s SnowflakeID>>* = Identify a Channel in the Server OTHER then the current channel to be affected by Name or Snowflake ID as declared by flag. Example `-n bot-spam` or `-s 123456789`\n:a: __Admin only__";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("u").desc("Channel Permission Tier [0-3]").hasArg(false).longOpt("undo").build());
@@ -2221,11 +2491,11 @@ public class UserActivity
 				String[] extraArgs = line.getArgs();
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
-					boolean setAnnoucement = !line.hasOption('u');
+					boolean setAnnouncement = !line.hasOption('u');
 					IChannel channel = parseChannel(ctx, line, true);
 					if (channel != null)
 					{
-						if (db.updateChannelAnnoucement(channel.getLongID(), channel.getGuild().getLongID(), setAnnoucement))
+						if (db.updateChannelAnnouncement(channel.getLongID(), channel.getGuild().getLongID(), setAnnouncement))
 						{
 							RequestBuffer.request(() -> {
 								ctx.getChannel().sendMessage("Channel Updated");
@@ -2244,7 +2514,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2281,7 +2551,7 @@ public class UserActivity
 		String description = ":large_orange_diamond: __VIP__: Create's a fetchable link to a YouTube video.";
 		String detailedDescription = "Stores a link to a YouTube video, likely mirrored as a local file avaliable for Frame Extraction.\nUsage: `"
 				+ usage
-				+ "`\n*[-l Link]* = Youtube Link to serve on request.\n*[-e Episode Name]* = Episode name to associate with the link. Example `-e Teddygozilla`\n*<-e Episode Name>* = Local Video in Database to associate with the Link. Example `-n EP01`\n*<-d Description>* = 480 character Description to associate with the Link and Episode name\n - Recreating already stored links, will just overwrite the associated data";
+				+ "`\n:large_orange_diamond: __VIP Only__\n*[-l Link]* = Youtube Link to serve on request.\n*[-e Episode Name]* = Episode name to associate with the link. Example `-e Teddygozilla`\n*<-e Episode Name>* = Local Video in Database to associate with the Link. Example `-n EP01`\n*<-d Description>* = 480 character Description to associate with the Link and Episode name\n - Recreating already stored links, will just overwrite the associated data";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(
@@ -2337,7 +2607,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2465,7 +2735,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2501,7 +2771,7 @@ public class UserActivity
 		String usage = prefix + name + " [<-l Link> or <-n Video Name> or <-e Episode Name>]";
 		String description = ":large_orange_diamond: __VIP__: Delete link to a YouTube video.";
 		String detailedDescription = "Deletes a link from the Database.\nUsage: `" + usage
-				+ "`\n*<-l Link>* = Youtube Link in Database.\n*<-n Video Name>* = Video Name to remove from Database. Example `-n EP01`\n*<-e Episode Name>* = Episode name to remove from Database\n";
+				+ "`\n:large_orange_diamond: __VIP Only__\n*<-l Link>* = Youtube Link in Database.\n*<-n Video Name>* = Video Name to remove from Database. Example `-n EP01`\n*<-e Episode Name>* = Episode name to remove from Database\n";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		OptionGroup g1 = new OptionGroup();
@@ -2537,7 +2807,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2569,15 +2839,16 @@ public class UserActivity
 		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
 		String name = "setOffset";
 		String[] aliases = new String[]
-		{ "updateOffset", "so" };
-		String usage = prefix + name + " [-n Video Name] [-o Offset]";
+		{ "updateOffset", "so", "addOffset", "uo", "ao" };
+		String usage = prefix + name + " [-n Video Name] <-o Offset>";
 		String description = ":large_orange_diamond: __VIP__: Add default offset to video";
 		String detailedDescription = "Adds a default offset to a Video file for every normal extraction. Used to sync local video with an external source. Can be bypassed with a -o flag in the Frame command.\nUsage: `"
-				+ usage + "`\n*[-n Video Name]* = Video file in Database to modify.\n*[-o Offset]* = Timecode offset to add to video";
+				+ usage
+				+ "`\n:large_orange_diamond: __VIP Only__\n*[-n Video Name]* = Video file in Database to modify.\n*<-o Offset>* = Timecode offset to add to video. Omit to reset Offset to zero.\n";
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
-		options.addOption(Option.builder("o").argName("##:##:##.###").desc("Timecode to stand for length of time").hasArg().longOpt("offset")
-				.required().build());
+		options.addOption(
+				Option.builder("o").argName("##:##:##.###").desc("Timecode to stand for length of time").hasArg().longOpt("offset").build());
 		options.addOption(Option.builder("n").argName("VideoName").desc("Video in Database to modify").hasArg().longOpt("name").required().build());
 		Command command = b.onCalled(ctx -> {
 			try
@@ -2588,7 +2859,7 @@ public class UserActivity
 				if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
 					if (db.updateVideoOffset(line.getOptionValue('n'),
-							Long.valueOf(Extractor.convertTimeToMilli(line.getOptionValue('o'), null, null))))
+							line.hasOption('o') ? Long.valueOf(Extractor.convertTimeToMilli(line.getOptionValue('o'), null, null)) : 0L))
 					{
 						RequestBuffer.request(() -> {
 							ctx.getChannel().sendMessage("Video Updated");
@@ -2606,7 +2877,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2699,7 +2970,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						ctx.getChannel().sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2719,6 +2990,118 @@ public class UserActivity
 			{
 				String errorMessage = prefix + name + " command experienced error for >" + ctx.getMessage().getContent();
 				logger.error(errorMessage, e);
+			}
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addSetupCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "setup";
+		String[] aliases = new String[]
+		{};
+		String usage = prefix + name + " <#>";
+		String description = "Walk Admin through setup process";
+		String detailedDescription = "Walkthrough the setup process of Frame-Summoner for the server.\nUsage: `" + usage
+				+ "`\n*<#>* = Page of setup to view.";
+		detailedDescription += appendAliases(aliases);
+		Command command = b.onCalled(ctx -> {
+			final IChannel location;
+			if (db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				location = ctx.getChannel();
+			else
+				location = ctx.getAuthor().getOrCreatePMChannel();
+			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
+			if (args.size() == 1 && args.get(0).equals(""))
+				args.remove(0);
+			if (args.size() == 0)
+			{
+				db.checkChannelPermission(ctx.getChannel().getLongID(), 3);
+				RequestBuffer.request(() -> {
+					ctx.getChannel().sendMessage(
+							":one: __Frame-Summoner Server Setup Guide__ - **START HERE** :checkered_flag:\nThis guide is for :a: Admins of a server that just added Frame-Summoner, to learn how to configure it. :tools:\nNormal server members should not bother with this guide. :no_pedestrians:\nThis First page of the guide will summarise all the controls avaliable to you, while further pages will walk you though how to do everything.\nEvery page on this guide can be accessed by simplying doing `"
+									+ prefix
+									+ "setup #` Replacing # with whatever page number you want.\nThis is Page **1**\n\nYou should know by now what this bot is for, if not do `"
+									+ prefix
+									+ "info -b`.\nSo now that you have it, everything about the Videos, upscaling, and such have been handled by :large_orange_diamond: VIPs.\nAll you have to do, is restrict the bot as much as you like to fit the needs of your server.\nYou have 4 ways to do this the Guide will explain in further detail.\n```md\n1. Designate Admins\n2. Setup Whitelist OR Blacklist\n3. Assign Channel Permission Tiers\n4. Lower Daily Extraction Maximum\n```\nAt any time thoughout the Guide, Use `"
+									+ prefix + "info -s` to see your current Server Settings. :information_source:\nAlso use `" + prefix
+									+ "command <Command Name>` to get detailed usage on the commands. :notebook_with_decorative_cover:\n\n:warning: **THIS TEXT CHANNEL HAS NOW BEEN DECLARED TIER 3** :warning:\nMeaning, all commands are unlocked for admins, for the purpose of setting up the bot.\nPlease continue your setup in this channel, until you finish page 4 and understand Channel Tiers :signal_strength: \nUse `"
+									+ prefix + "setup 2` to move on.");
+				}).get();
+			}
+			else if (args.size() == 1)
+			{
+				final String page;
+				switch (args.get(0))
+				{
+					case "0":
+					case "1":
+						page = ":one: __Frame-Summoner Server Setup Guide__ - **START HERE** :checkered_flag:\nThis guide is for :a: Admins of a server that just added Frame-Summoner, to learn how to configure it. :tools:\nNormal server members should not bother with this guide. :no_pedestrians:\nThis First page of the guide will summarise all the controls avaliable to you, while further pages will walk you though how to do everything.\nEvery page on this guide can be accessed by simplying doing `"
+								+ prefix
+								+ "setup #` Replacing # with whatever page number you want.\nThis is Page **1**\n\nYou should know by now what this bot is for, if not do `"
+								+ prefix
+								+ "info -b`.\nSo now that you have it, everything about the Videos, upscaling, and such have been handled by :large_orange_diamond: VIPs.\nAll you have to do, is restrict the bot as much as you like to fit the needs of your server.\nYou have 4 ways to do this the Guide will explain in further detail.\n```md\n1. Designate Admins\n2. Setup Whitelist OR Blacklist\n3. Assign Channel Permission Tiers\n4. Lower Daily Extraction Maximum\n```\nAt any time thoughout the Guide, Use `"
+								+ prefix + "info -s` to see your current Server Settings. :information_source:\nAlso use `" + prefix
+								+ "command <Command Name>` to get detailed usage on the commands. :notebook_with_decorative_cover:\n\nUse `" + prefix
+								+ "setup 2` to move on.";
+						break;
+					case "2":
+						page = ":two: __Frame-Summoner Server Setup Guide__ - **Designate Admins**\nThe First Thing to do is fairly simple.\nDesignate which Roles on your server the bot should obey as :a: Admins\nThey have total control over what the bot can do in their server\nInitially, All Roles with the `Manage Server` permission are designated as admin.\nServer Owners are always Admin no matter what :crown: \n\n> To Add :a: Admin Roles, use `"
+								+ prefix + "addAdminRole...`\n> To Remove :a: Admin Roles, use `" + prefix
+								+ "removeAdminRole...`\n\nAs said in Page 1, instructions on how to use any command are obtained by `" + prefix
+								+ "command <Command Name>`\nUse `" + prefix + "setup 3` to move on.";
+						break;
+					case "3":
+						page = ":three: __Frame-Summoner Server Setup Guide__ - **Setup Access List**\nThe Next thing to do is setup the :black_square_button: White/Black List.\nYou dont have to let everyone use the bot.\nYou can have the bot only response to 'normal' (non-Admin) commands based on the roles someone has.\nYou can either setup a :black_large_square: blacklist of roles to :no_entry: deny permission to.\nOr a :white_large_square: Whitelist of roles that are :eight_spoked_asterisk: granted permission.\nYou can NOT have both\n\nInitially, the Server starts off as a :white_large_square: Whitelist, with no roles in the list yet.\n> If you would rather change to a :black_large_square: Blacklist, do `"
+								+ prefix
+								+ "clm` now.\nThe rest of the commands for this section apply to both Whitelist and Blacklist,\n\nDecide which roles you want to add to the :black_square_button: White/Black List\n> Use `"
+								+ prefix + "addListedRole...` to Add Roles to the List\n> Use`" + prefix
+								+ "removeListedRole...` to Remove Roles from the list\n\nUse `" + prefix + "setup 4` to see the next page.";
+						break;
+					case "4":
+						page = ":four: __Frame-Summoner Server Setup Guide__ - **Setup Channel Permissions**\nThe Last big thing to do, is to assign your channels permission tiers. :signal_strength:\nWhen you first did `"
+								+ prefix
+								+ "setup` in whatever channel you were in, you may have noticed the bot flashed a notice like...\n:warning: **THIS TEXT CHANNEL HAS NOW BEEN DECLARED TIER 3** :warning:\nThis was necessary for the bot to honor any of the commands you have entered.\nThis is because on server join, the bot gives every channel visible to it an initial *Permission Tier* of 0.\nThis Tier tells the bot what commands it can, and can't respond to.\nAll commands will refuse to execute if the required Tier for it, is lower then the one the Channel is assigned.\n So a Tier 2 Command like `"
+								+ prefix
+								+ "frame` will be ignored in channels Tier 1 and below.\nThe 4 Avaliable Tiers are setup as follows.\n\nTier 0 = :mute: No response to any commands\n```\nInfo, Setup, and Guide commands will respond in PMs instead.\n```\nTier 1 = :information_source: Basic Info Commands\n```\ninfo\nguide\nhelp\ncommand\n```\nTier 2 = :asterisk: Main Commands\n```\nframe\nlist\nlink\n```\nTier 3 = :a: Admin Commands\n```\nnewAdminRole\nremoveAdminRole\nnewListedRole\nremoveListedRole\nchangeListingMode\nchangeChannelTier\nchangeChannelAnnoucement\nsetServerLimit\nsetup\n```\nThe rest are for :large_orange_diamond: VIPs or :customs: The Operator: "
+								+ ctx.getClient().getUserByID(Long.parseLong(prop.getProperty("Bot_Manager"))).getName()
+								+ "\n\nIf you need to see descriptions of all these commands before deciding their Tiers, use `" + prefix
+								+ "commands`\n\n> Use `" + prefix
+								+ "changeChannelTier...` in every channel you want to change *Permission Tier*\nRemember, every channel starts off at 0 already\nAlso remember, this channel was set to Tier 3 when `"
+								+ prefix + "setup` was executed for the purposes of setup\n\nUse `" + prefix + "setup 5` to move on.";
+						break;
+					case "5":
+						page = ":five: __Frame-Summoner Server Setup Guide__ - **Restrict Extractions**\nIt is unlikely you will ever want to do this, but...\nIf you want to decrease frame-extraction spam,\nyou can decrease the Daily Server limit of extractions. :octagonal_sign:\nThe highest limit set by :large_orange_diamond: VIPs is *"
+								+ prop.getProperty("MaxServerExtracts")
+								+ "*\nYou can decrease it from there to zero or something inbetween\n\n> Use `" + prefix
+								+ "setServerLimit...` to change Daily Server Wide Extraction Limit\n\nUse `" + prefix + "setup 6` to move on.";
+						break;
+					case "6":
+						page = ":moneybag: __Frame-Summoner Server Setup Guide__ - **Profit**\nExecute `" + prefix
+								+ "info -s` one last time to see if the Server is configured as you want.\nOtherwise, thats it, congrats, the bot is now setup.\nPeople can start using it already, if you gave them permission to do so.\n\nThe Last important thing to do, is to annouce to everyone the bot exists.\nI recommend you include in your annoucement to use `"
+								+ prefix
+								+ "help` as a starting point for everyone who wants to use the bot.\n:large_orange_diamond: VIPs may be in your server that can help normal people with further questions.\nIf any :a: Admins have further questions, bring them up in <#523724442615021583>\n\nYou can change server settings at any time, just use the commands learned.\nA much more condensed reference guide for setup can be found with `"
+								+ prefix + "guide init`\n";
+						break;
+					case "7":
+						page = "__Frame-Summoner Server Setup Guide **Page 7**__\n";
+						break;
+					default:
+						page = "Page does not exist";
+						break;
+				}
+				RequestBuffer.request(() -> {
+					location.sendMessage(page);
+				}).get();
+			}
+			else
+			{
+				RequestBuffer.request(() -> {
+					location.sendMessage("Too Many Arguments");
+				}).get();
 			}
 		}).build();
 		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
@@ -2746,25 +3129,36 @@ public class UserActivity
 		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Initalization Guide");
-		eb.withDesc("How to setup the bot to your liking in your Server");
+		eb.withDesc("How to setup the bot in your Server - Admin Only");
 		//Thumbnails content changed at runtime
 		//eb.withImage("");
-		eb.appendField("1. Designate at least one Admin Channel",
-				"Use `" + prefix + "cct -t 3` in a Server channel where you will continue initalization **REQUIRED**", false);
-		eb.appendField("2. Check Command Help", "Use `fs!help` in the channel above. You will be referencing it often for the rest of the guide.",
+		eb.appendField("1. Pick a Channel to setup in",
+				"Use `" + prefix + "cct -t 3` in a Server channel where you will continue setup **REQUIRED FIRST STEP**", false);
+		eb.appendField("2. Check Command List",
+				"Use `" + prefix + "commands` in the channel above. \nYou will be referencing it often for the rest of the guide.", false);
+		eb.appendField("3. Check Initial Server Settings", "Use `" + prefix + "info -s` to see how the server is currently configured.", false);
+		eb.appendField("4. Designate Administrator Roles",
+				"Check out the `" + prefix + "aar` and the `" + prefix + "rar` command, to give other Discord roles Frame-Summoner Admin", false);
+		eb.appendField("5. Set Server Listing Mode",
+				"For your normal Users, decide which roles have the privilege of using Frame-Summoner.\nBy Default, there is an empty whitelist, you can use a blacklist instead.\nUse `"
+						+ prefix + "clm` to toggle between them",
 				false);
-		eb.appendField("3. Check Initial Server Settings", "Use `fs!info -s` to see how the server is currently configured. ", false);
-		eb.appendField("4. Set Server Daily Extraction Limit", "Use `fs!ssl..` if you need to reduce usage server wide for some reason", false);
-		eb.appendField("5. Set Server Listing Mode", "Use `fs!clm` if you would rather use a Whitelist instead of the default Blacklist", false);
-		eb.appendField("6. Designate Administrator Roles", "Use `fs!aar...` to give other Discord roles, Frame-Summoner Administrator authority",
+		eb.appendField("6. Designate Listed Roles",
+				"Use `" + prefix + "alr...` and `" + prefix + "rlr` to Blacklist or Whitelist roles for normal Frame-Summoner usage", false);
+		eb.appendField("7. Designate Channel Permissions",
+				"Use `" + prefix + "cct...` change which commands are allowed in which channels\n Every channel is set to a default Tier of 0.\nDo `"
+						+ prefix + "setup 4` to see the different avaliable tiers",
 				false);
-		eb.appendField("7. Designate Listed Roles", "Use `fs!alr...` to Blacklist or Whitelist roles for normal Frame-Summoner usage", false);
-		eb.appendField("8. Designate Channel Permissions",
-				"Use `fs!cct...` in other channels to change which commands are allowed in which channels\n default = 0", false);
-		eb.appendField("9. Double Check Server Settings", "Use `fs!info -s` to see if there is anything else you want to change. ", false);
-		eb.appendField("Profit", ":moneybag:", false);
+		eb.appendField("8. Set Server Daily Extraction Limit", "Check out the `" + prefix + "ssl` command, if you need to reduce daily usage", false);
+		eb.appendField("9. Double Check Server Settings", "Use `" + prefix + "info -s`, to see if there is anything else you forgot to change.",
+				false);
+		eb.appendField("Profit :moneybag:",
+				"Annouce to everyone this bot is now avaliable.\n The `" + prefix + "help` command should be advertised to tell people how get started with the bot", false);
+		eb.appendField("More Help", "Admins should use `" + prefix + "setup 1` for more detailed help\n`" + prefix
+				+ "help` should cover everything else\nIf you still need help with something. Ping a Frame-Summoner VIP likely to be in your server",
+				false);
 		//Footer content changed at runtime
-		sb.put("init", eb);
+		sb.put("setup", eb);
 		eb = new EmbedBuilder();
 		eb.withColor(new Color(0, 255, 255));
 		eb.withAuthorName("FoxTrot Fanatics");
@@ -2772,20 +3166,24 @@ public class UserActivity
 		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Frame Extraction Guide");
-		eb.withDesc("How to extract a frame from the videos correctly");
+		eb.withDesc("How to extract a frame using Frame-Summoner");
 		//eb.withThumbnail("");
 		//eb.withImage("");
-		eb.appendField("1. Learn more abou the Frame command", "Use `" + prefix + "help frame` in an appropriate channel.", false);
-		eb.appendField("2. Use the List command to see what is avaliable", "Use `fs!list` to get a list of videos prepared for extraction", false);
-		eb.appendField("3. Figure out the timecode of the Frame", "Best thing to do is check out youtube, skip to the frame and get the timecode",
+		eb.appendField("1. Pick a Video!",
+				"Use `" + prefix + "list` to see what is avaliable.\nThen do `" + prefix + "link -n [Video Name]` for a link to it", false);
+		eb.appendField("2. Find the Frame!",
+				"Scan through the video in the link, until you get the timecode of the frame you want", false);
+		eb.appendField("3. Summon it!", "Send the Frame Command, like this `" + prefix + "f [Video Name] [Time code]\nExamples:\n`" + prefix
+				+ "f EP00 41:24.750`\n`" + prefix + "f EP05 10:00`\n`" + prefix + "f EP42 49`", false);
+		eb.appendField("4. Refine it!",
+				"Frame didnt match up perfectly?\nAdjust the timecode and try again, or use the `-f` flag before the Video name to jump forward frame by frame\nExample: `"
+						+ prefix + "f -f 10 EP04 0:15` <Will Upload the 10th Frame after the 15 second mark of Video \"EP04\"",
 				false);
-		eb.appendField("4. Run an extraction", "Fill in the parameters of the command with the info you have", false);
-		eb.appendField("6. Adjust if necessary", "Extract again with the -c flag if you need to be more precise (read command details)", false);
-		eb.appendField("$. Check out Recommendations", "Use `<COMING SOON>` to see a list of approved memorable moments", false);
-		eb.appendField("!. Watch your Limit", "To prevent abuse, Extractions are limited to " + prop.getProperty("MaxUserExtracts") + "/day per User",
+		//eb.appendField("$. Check out Recommendations", "Use `<COMING SOON>` to see a list of approved memorable moments", false);
+		eb.appendField("! Watch your Limit !", "To prevent abuse, Extractions are limited to " + prop.getProperty("MaxUserExtracts") + "/day per User",
 				false);
 		eb.appendField("Profit", ":moneybag:", false);
-		//Footer Content changed at runtime
+		//Footer Content changed at runtime when called.
 		sb.put("frame", eb);
 		Command command = b.onCalled(ctx -> {
 			final IChannel location;
@@ -2821,19 +3219,20 @@ public class UserActivity
 				}
 				else if (extraArgs.length == 0 || (extraArgs[0].equals("") && extraArgs.length == 1))
 				{
-					StringBuilder guides = new StringBuilder("```md\n");
+					StringBuilder guides = new StringBuilder("__");
 					guides.append(sb.size());
-					guides.append(" Avaliable Guides\n");
+					guides.append(" Avaliable Guides__\n");
 					for (Entry<String, Object> e : sb.entrySet())
 					{
+						guides.append('`');
 						guides.append(prefix);
 						guides.append("guide ");
 						guides.append(e.getKey());
+						guides.append('`');
 						guides.append(" = ");
-						guides.append(((EmbedObject) e.getValue()).title);
+						guides.append(((EmbedBuilder) e.getValue()).build().title);
 						guides.append('\n');
 					}
-					guides.append("```");
 					RequestBuffer.request(() -> {
 						location.sendMessage(guides.toString());
 					});
@@ -2843,7 +3242,7 @@ public class UserActivity
 					RequestBuffer.request(() -> {
 						location.sendMessage(":octagonal_sign: Unrecognized arguments: `" + line.getArgList()
 								+ "`\nMaybe you provided an argument with spaces? Those require \"Double Quotation Marks\" to interpret correctly\nDo `"
-								+ prefix + "help " + name + "` for proper Usage");
+								+ prefix + "command " + name + "` for proper Usage");
 					});
 				}
 			}
@@ -2852,12 +3251,12 @@ public class UserActivity
 				logger.warn("Incomplete Double Quotes in message: {}", ctx.getMessage().getContent());
 				final String response = ":octagonal_sign: Double Quotes unclosed, could not parse command around: `" + e.getMessage() + "`";
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(response);
+					location.sendMessage(response);
 				});
 			}
 			catch (ParseException e)
 			{
-				handleParseException(ctx.getChannel(), e, name);
+				handleParseException(location, e, name);
 			}
 			catch (Exception e)
 			{
@@ -2875,13 +3274,67 @@ public class UserActivity
 		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
 		String name = "help";
 		String[] aliases = new String[]
-		{ "halp" };
-		String usage = prefix + name + " <Command>";
+		{};
+		String usage = prefix + name;
 		String description = "Display avaliable Command list with descriptions, or details just for one";
-		String detailedDescription = "You want help about using the Help command? Sheesh, seems like you figured it out already.\nUsage: `" + usage
-				+ "`\n*<Command>* = Name of Command to get detailed info about, all commands case sensitive, but some command have aliases for convenience.";
+		String detailedDescription = "Guides Users with whatever they need help with.";
 		detailedDescription += appendAliases(aliases);
 		Command command = b.onCalled(ctx -> {
+			final IChannel location;
+			String channelWarning;
+			if (db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+			{
+				channelWarning = "";
+				location = ctx.getChannel();
+			}
+			else
+			{
+				channelWarning = ":warning: This command was executed in PMs because the Server Admins does not want commands to be used in <#"
+						+ ctx.getChannel().getLongID() + ">\nIf you are having trouble with something, that might be why\n\n";
+				location = ctx.getAuthor().getOrCreatePMChannel();
+			}
+			String adminHelp;
+			if (AdminLimiter.checkAdmin(db, ctx.getGuild(), ctx.getAuthor()))
+			{
+				adminHelp = "\n\n:a: Admin Specific Help\nIf you want a quick reference to Server Setup, use `" + prefix
+						+ "guide setup`\nIf you want the full setup guide, start with `" + prefix + "setup 1`";
+			}
+			else
+			{
+				adminHelp = "";
+			}
+			RequestBuffer.request(() -> {
+				location.sendMessage(channelWarning
+						+ "__Frame-Summoner Help Response__\nWhat would you like help with?\n\n:book: If you want to see the list of commands, use `" + prefix + "commands`\n:page_facing_up: If you want to get detailed help on a specific command, use `" + prefix + "command [Command Name]`\n\n:movie_camera: **If you would like to learn how to extract a frame, do `"
+						+ prefix + "guide frame`**\n\n:no_entry: If you want to see what channels you can extract frames in, do `" + prefix
+						+ "info -s` and look at the :asterisk: \"Full Usage Channels\"\n:no_entry: If you want to see what roles the Server Admins require you to have,\ndo `"
+						+ prefix
+						+ "info -s` and make sure you have none of the :black_large_square: Blacklisted roles, OR at least one of the :white_large_square: Whitelisted Roles\n\n:information_source: If you want to learn more about the bot, use `" + prefix + "info -b`\n:information_source: If you want to see your current standing with the bot, use `" + prefix + "info -u`\n\n:clock3: If you, or the Server, in total have extracted too many times...\nSorry, we are trying to prevent abuse.\nWait for the next reset in `"
+						+ Extractor.convertMilliToTime(Extractor.localSecondsUntilMidnight() * 1000) + "`" + adminHelp);
+			});
+		}).build();
+		commands.add(new CommandWrapper(command, commandTier, usage, description, detailedDescription, name, aliases));
+		registry.register(command, name, aliases);
+	}
+
+	private void addCommandsCommand(int commandTier, Limiter[] limits)
+	{
+		Builder b = Command.builder();
+		b.limiters(new LinkedHashSet<Limiter>(Arrays.asList(limits)));
+		String name = "commands";
+		String[] aliases = new String[]
+		{ "command" };
+		String usage = prefix + name + " <Command>";
+		String description = "Display avaliable Command list with descriptions, or details just for one";
+		String detailedDescription = "You want Command Info about the \"Command\" command? Sheesh, seems like you figured it out already.\nUsage: `" + usage
+				+ "`\n*<Command>* = Name of Command to get detailed info about, all commands case sensitive, but some commands have aliases for convenience.";
+		detailedDescription += appendAliases(aliases);
+		Command command = b.onCalled(ctx -> {
+			final IChannel location;
+			if (db.checkChannelPermission(ctx.getChannel().getLongID(), 1))
+				location = ctx.getChannel();
+			else
+				location = ctx.getAuthor().getOrCreatePMChannel();
 			ArrayList<String> args = new ArrayList<String>(ctx.getArgs());
 			if (args.size() == 1 && args.get(0).equals(""))
 				args.remove(0);
@@ -2904,7 +3357,7 @@ public class UserActivity
 						inline.add(false);
 					}
 				}
-				sendEmbedList(ctx, new Color(255, 255, 0), "Command List",
+				sendEmbedList(ctx, location, new Color(255, 255, 0), "Command List",
 						"All Frame-Summoner commands, avaliable to " + ctx.getAuthor().getDisplayName(ctx.getGuild()) + " [Required] <Optional>",
 						null, textTitle, textValue, inline, null);
 			}
@@ -2929,8 +3382,8 @@ public class UserActivity
 				if (longDescription == null)
 				{
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(
-								"Unknown Command!\nUse " + prefix + "help for Command List\nUsage: **" + prefix + "help** <Command Name>");
+						location.sendMessage(
+								"Unknown Command!\nUse " + prefix + "commands for Command List\nUsage: **" + prefix + "command** <Command Name>");
 					});
 				}
 				else
@@ -2942,14 +3395,14 @@ public class UserActivity
 					}
 					final String message = longDescription + permission;
 					RequestBuffer.request(() -> {
-						ctx.getChannel().sendMessage(message);
+						location.sendMessage(message);
 					});
 				}
 			}
 			else
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage("Too Many Arguments");
+					location.sendMessage("Too Many Arguments");
 				}).get();
 			}
 		}).build();
@@ -3193,29 +3646,13 @@ public class UserActivity
 		IUser user = null;
 		if (line.hasOption('n'))
 		{
-			List<IUser> users = ctx.getClient().getUsersByName(line.getOptionValue('n'), true);
-			if (users.size() == 1)
-				user = users.get(0);
-			else if (users.size() == 0)
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(":no_entry_sign: No User with that name!");
-				});
-				return null;
-			}
-			else
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(":no_entry_sign: Too many Users with this Name!");
-				});
-				return null;
-			}
+			user = parseUser(ctx, line.getOptionValue('n'));
 		}
 		else if (line.hasOption('s'))
 		{
 			try
 			{
-				user = ctx.getClient().getUserByID(Long.parseLong(line.getOptionValue('s')));
+				user = parseUser(ctx, Long.parseLong(line.getOptionValue('s')));
 			}
 			catch (NumberFormatException e)
 			{
@@ -3224,18 +3661,46 @@ public class UserActivity
 				});
 				return null;
 			}
-			if (user == null)
-			{
-				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(":no_entry_sign: No User with this Snowflake ID!");
-				});
-				return null;
-			}
 		}
 		else
 		{
 			throw new IllegalArgumentException(
 					"Required Flags -n or -s never set! ParseException should have occured or Option Configuration incorrect.");
+		}
+		return user;
+	}
+
+	private IUser parseUser(CommandContext ctx, String name)
+	{
+		IUser user;
+		List<IUser> users = ctx.getClient().getUsersByName(name, true);
+		if (users.size() == 1)
+			user = users.get(0);
+		else if (users.size() == 0)
+		{
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(":no_entry_sign: No User with that name!");
+			});
+			return null;
+		}
+		else
+		{
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(":no_entry_sign: Too many Users with this Name!");
+			});
+			return null;
+		}
+		return user;
+	}
+
+	private IUser parseUser(CommandContext ctx, long snowflake)
+	{
+		IUser user = ctx.getClient().getUserByID(snowflake);
+		if (user == null)
+		{
+			RequestBuffer.request(() -> {
+				ctx.getChannel().sendMessage(":no_entry_sign: No User with this Snowflake ID!");
+			});
 		}
 		return user;
 	}
@@ -3292,7 +3757,7 @@ public class UserActivity
 		{
 			logger.error("Unable to Determine ParseException Instance", e);
 		}
-		final String response = ":octagonal_sign: " + specificError + "\nDo `" + prefix + "help " + commandName + "` for proper Usage";
+		final String response = ":octagonal_sign: " + specificError + "\nDo `" + prefix + "command " + commandName + "` for proper Usage";
 		RequestBuffer.request(() -> {
 			ch.sendMessage(response);
 		});
@@ -3386,7 +3851,7 @@ public class UserActivity
 		return result;
 	}
 
-	public void sendEmbedList(CommandContext ctx, Color c, String title, String desc, String thumbnail, ArrayList<String> textTitle,
+	public void sendEmbedList(CommandContext ctx, IChannel ch, Color c, String title, String desc, String thumbnail, ArrayList<String> textTitle,
 			ArrayList<String> textValue, ArrayList<Boolean> inline, String footer)
 	{
 		int pageCount = ((int) Math.ceil(textTitle.size() / 25.0));
@@ -3423,7 +3888,7 @@ public class UserActivity
 			}
 			message.withFooterIcon(ctx.getAuthor().getAvatarURL());
 			RequestBuffer.request(() -> {
-				return ctx.getChannel().sendMessage(message.build());
+				return ch.sendMessage(message.build());
 			}).get();
 		}
 	}
