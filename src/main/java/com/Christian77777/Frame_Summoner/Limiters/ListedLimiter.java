@@ -1,16 +1,16 @@
 /**
  * 
  */
+
 package com.Christian77777.Frame_Summoner.Limiters;
 
 import java.util.ArrayList;
-import com.Christian77777.Frame_Summoner.Database;
 import com.Christian77777.Frame_Summoner.Database.DBRolePerm;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.limiter.Limiter;
-import sx.blah.discord.handle.obj.IGuild;
+import sx.blah.discord.handle.obj.IChannel;
 import sx.blah.discord.handle.obj.IRole;
-import sx.blah.discord.handle.obj.IUser;
 import sx.blah.discord.util.RequestBuffer;
 
 /**
@@ -21,7 +21,7 @@ public class ListedLimiter implements Limiter
 {
 	private Database db;
 	private boolean failPrivately;
-	
+
 	/**
 	 * 
 	 */
@@ -34,39 +34,10 @@ public class ListedLimiter implements Limiter
 	@Override
 	public boolean check(CommandContext ctx)
 	{
-		return checkWhitelisted(db, ctx.getGuild(), ctx.getAuthor());
-	}
-	
-	@Override
-	public void onFail(CommandContext ctx)
-	{
-		if(failPrivately)
-		{
-			RequestBuffer.request(() -> {
-				ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry_sign: You are not authorized to use this command in this server");
-			});
-		}
-		else
-		{
-			RequestBuffer.request(() -> {
-				ctx.getChannel().sendMessage(":no_entry_sign: You are not authorized to use this command in this server");
-			});
-		}
-	}
-	
-	/**
-	 * Check if the User is allowed to use the bot in the server
-	 * REQUIRED ASSUMPTION: Server must have a single mode, Blacklist or Whitelist. All entries for a single guild assumed
-	 * to be of one type
-	 * @param guild Guild where the rules are relevant
-	 * @param user who needs to be checked
-	 * @return if user has the proper roles required
-	 */
-	public static boolean checkWhitelisted(Database db, IGuild guild, IUser user)
-	{
+		Standing standing = null;
 		ArrayList<Long> actualRoles = new ArrayList<Long>();
 		//Insertion Sort, for sorting the user roles in ascending order. Using Insertion Sort because iteration is already required to extract the actual Longs
-		for (IRole r : user.getRolesForGuild(guild))
+		for (IRole r : ctx.getAuthor().getRolesForGuild(ctx.getGuild()))
 		{
 			if (actualRoles.isEmpty())
 				actualRoles.add(r.getLongID());
@@ -82,12 +53,12 @@ public class ListedLimiter implements Limiter
 						break;
 					}
 				}
-				if(!wasInserted)
+				if (!wasInserted)
 					actualRoles.add(r.getLongID());
 			}
 		}
 		//Get already sorted list of relevant roles for Guild
-		ArrayList<DBRolePerm> rolePerms = db.getReleventRoles(guild.getLongID());
+		ArrayList<DBRolePerm> rolePerms = db.getReleventRoles(ctx.getGuild().getLongID());
 		if (!rolePerms.isEmpty())
 		{
 			boolean isBlacklist = rolePerms.get(0).getBlackVSWhite();//Hints Guild Listing Mode
@@ -99,10 +70,8 @@ public class ListedLimiter implements Limiter
 				int comparision = actualRoles.get(lIndex).compareTo(rolePerms.get(rIndex).getRoleID());
 				if (comparision == 0)//Match found
 				{
-					if (isBlacklist)//Blacklist matched
-						return false;
-					else//Whitelist matched
-						return true;
+					standing = new Standing(isBlacklist, actualRoles.get(lIndex), !isBlacklist);
+					break;
 				}
 				else if (comparision > 0)
 					rIndex++;
@@ -110,15 +79,68 @@ public class ListedLimiter implements Limiter
 					lIndex++;
 			}
 			//No Match found, use Hint as database mode
-			if (isBlacklist)//blacklist
-				return true;
-			else
-				return false;
+			if (standing == null)
+			{
+				standing = new Standing(isBlacklist, null, isBlacklist);
+			}
 		}
-		//No comparison found, must check if white or blacklist (BUG Admin about requiring two Database calls)
-		if (db.checkGuildBlacklistMode(guild.getLongID()))
+		//No comparison found, must check if white or blacklist (Complain to Admin about requiring a second Database call)
+		else
+		{
+			boolean isBMode = db.checkGuildBlacklistMode(ctx.getGuild().getLongID());
+			standing = new Standing(isBMode, null, isBMode);
+		}
+		if (standing.pass)
 			return true;
 		else
+		{
+			IChannel c;
+			String message;
+			if (standing.isBlacklist)
+				message = ":no_entry_sign: Server Admins of `" + ctx.getGuild().getName()
+						+ "` have :black_large_square: Blacklisted you from making requests to Frame-Summoner in their server, because you have the `"
+						+ ctx.getGuild().getRoleByID(standing.roleName).getName() + "` Role";
+			else
+				message = ":no_entry_sign: Server Admins of `" + ctx.getGuild().getName()
+						+ "` have not :white_large_square: Whitelisted you to make requests to Frame-Summoner, in their server";
+			if (failPrivately)
+				c = ctx.getAuthor().getOrCreatePMChannel();
+			else
+				c = ctx.getChannel();
+			RequestBuffer.request(() -> {
+				c.sendMessage(message);
+			});
 			return false;
+		}
+	}
+
+	public class Standing
+	{
+		private boolean isBlacklist;
+		private Long roleName;
+		private boolean pass;
+
+		public Standing(boolean isBlacklist, Long roleName, boolean pass)
+		{
+			this.isBlacklist = isBlacklist;
+			this.roleName = roleName;
+			this.pass = pass;
+		}
+
+		public boolean isBlacklist()
+		{
+			return isBlacklist;
+		}
+
+		public Long getRoleName()
+		{
+			return roleName;
+		}
+
+		public boolean isPass()
+		{
+			return pass;
+		}
+
 	}
 }
