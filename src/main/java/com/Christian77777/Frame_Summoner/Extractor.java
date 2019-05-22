@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.Christian77777.Frame_Summoner.Database.DBGuild;
 import com.Christian77777.Frame_Summoner.Database.DBLink;
 import com.Christian77777.Frame_Summoner.Database.DBNormalUser;
@@ -333,7 +334,7 @@ public class Extractor
 			if (!g.isEnabled() && !isVIP)
 			{
 				RequestBuffer.request(() -> {
-					ctx.getChannel().sendMessage(":red_circle: This Server is disabled from extracting Frames until it is reenabled.");
+					ctx.getChannel().sendMessage(":red_circle: This Server is unauthorized to extract Frames until it is reinstated.");
 				});
 				return false;
 			}
@@ -360,7 +361,7 @@ public class Extractor
 				}
 			}
 			else
-				person = db.new DBNormalUser(ctx.getAuthor().getLongID());
+				person = new DBNormalUser(ctx.getAuthor().getLongID());
 			//Permission Denied if not VIP and over the maximum number of extractions per Server
 			if (!isVIP && g.getUsedToday() >= g.getRequestLimit())
 			{
@@ -396,11 +397,11 @@ public class Extractor
 			long properTimestamp = convertTimeToMilli(timecode, null, null);
 			ArrayList<DBLink> links = db.getLink(nickname, false, isVIP);
 			DBLink link = null;
-			if(!links.isEmpty())
+			if (!links.isEmpty())
 				link = links.get(0);
 			//Keep timecode and offset separate to obfuscate offset to users
-			if (queue.offer(new ExtractionJob(ctx.getMessage(), ctx.getAuthor(), g, person, link, data, properTimestamp, useOffset,
-					frameCount, maxUserExtracts, isVIP)))//Add to Queue if not too full
+			if (queue.offer(new ExtractionJob(ctx.getMessage(), ctx.getAuthor(), g, person, link, data, properTimestamp, useOffset, frameCount,
+					maxUserExtracts, isVIP)))//Add to Queue if not too full
 			{
 				RequestBuffer.request(() -> {
 					ctx.getMessage().addReaction(UserActivity.ok);
@@ -438,23 +439,26 @@ public class Extractor
 		job.message.getClient().changePresence(StatusType.IDLE, ActivityType.PLAYING, job.video.getNickname());
 		RequestBuffer.request(() -> {
 			job.message.addReaction(UserActivity.begin);
-			//TODO Add Reaction Instead
 		}).get();
-		String timecode = "";
+		String frameSkip = "";
 		if (job.frameCount != null)
 		{
-			timecode = "-filter:v \"select=gte(n\\," + job.frameCount + ")\" ";
+			frameSkip = "-filter:v select=gte(n\\," + job.frameCount + ") ";
 		}
-		String offsetTime = convertMilliToTime(job.timecode + (job.useOffset ? job.video.getOffset() : 0));
+		String startTime = convertMilliToTime(job.timecode + (job.useOffset ? job.video.getOffset() : 0));
 		//Extraction by exact time code: ffmpeg -ss ##:##:##.### -i "C:\Path\to\Video" -t 1 -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
 		//Extraction by Timestamp and frame number in range [0,fps):ffmpeg -ss ##:##:## -i "C:\Path\to\Video" -filter:v "select=gte(n/,%%FRAMENUMBER)" -f image2 -frames:v 1 "C:\Path\to\frame-videofilename.png"
-		String command = "" + prop.getProperty("FFmpeg_Path") + " -loglevel quiet -y -ss " + offsetTime + " -i " + videoFile.getAbsolutePath()
-				+ " " + timecode + "-f image2 -frames:v 1 " + DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname()
-				+ ".png";
+		String command = "" + escapeFilepath(prop.getProperty("FFmpeg_Path")) + " -loglevel error -y -ss " + startTime + " -i "
+				+ escapeFilepath(videoFile.getAbsolutePath()) + " " + frameSkip + "-f image2 -frames:v 1 "
+				+ escapeFilepath(DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname() + ".png");
 		try
 		{
-			logger.info("Command: ({})", command);
+			logger.info("Command> {}", command);
 			Process r = Runtime.getRuntime().exec(command);
+			StreamGobbler reader = new StreamGobbler(r.getInputStream(), true);
+			StreamGobbler eater = new StreamGobbler(r.getErrorStream(), true);
+			reader.start();
+			eater.start();
 			int exitValue = -1;
 			boolean waiting = false;
 			do
@@ -483,17 +487,17 @@ public class Extractor
 				long completionTimestamp = Instant.now().toEpochMilli();
 				logger.info("Process Completed");
 				File frameFile = new File(DRI.dir + File.separator + "frame-cache" + File.separator + "frame-" + job.video.getNickname() + ".png");
-				if(frameFile.exists())
+				if (frameFile.exists())
 				{
 					EmbedBuilder frameEmbed = new EmbedBuilder();
-					frameEmbed.withColor(new Color(152,146,251));
+					frameEmbed.withColor(new Color(152, 146, 251));
 					frameEmbed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 					frameEmbed.withAuthorName("FoxTrot Fanatics");
 					frameEmbed.withAuthorUrl("https://foxtrotfanatics.info");
-					if(job.link != null)
+					if (job.link != null)
 					{
 						frameEmbed.withTitle(job.link.getTitle());
-						if(job.link.getDescription() != null)
+						if (job.link.getDescription() != null)
 							frameEmbed.withDesc(job.link.getDescription());
 						frameEmbed.withUrl(job.link.getLink());
 					}
@@ -502,20 +506,24 @@ public class Extractor
 					frameEmbed.withFooterText("Requested By: \"" + job.author.getDisplayName(job.message.getGuild()) + "\"");
 					frameEmbed.appendField("Video name", job.video.getNickname(), true);
 					frameEmbed.appendField("Timecode", convertMilliToTime(job.timecode), true);
-					if(job.frameCount != null)
+					if (job.frameCount != null)
 						frameEmbed.appendField("Frame Offset", String.valueOf(job.frameCount), true);
 					//TODO Moment Field Inline
 					frameEmbed.appendField("Accessibility", job.video.isRestricted() ? ":large_orange_diamond:" : ":arrow_forward:", false);
 					frameEmbed.withImage("attachment://" + frameFile.getName());
-					if(job.elevated)
+					if (job.elevated)
 					{
 						frameEmbed.appendField("User Extraction Count", (job.user.getUsedToday() + 1) + " :large_orange_diamond:", true);
 						frameEmbed.appendField("Server Extraction Count", "unaffected (" + (job.guild.getUsedToday()) + ")", true);
 					}
 					else
 					{
-						frameEmbed.appendField("User Extraction Count", (job.user.getUsedToday() + 1 >= job.maxUserCount ? ":arrow_up: " : "") + (job.user.getUsedToday() + 1) + "/" + job.maxUserCount, true);
-						frameEmbed.appendField("Server Extraction Count", (job.guild.getUsedToday() + 1 >= job.guild.getRequestLimit() ? ":arrow_up: " : "") + (job.guild.getUsedToday() + 1) + "/" + job.guild.getRequestLimit(), true);
+						frameEmbed.appendField("User Extraction Count", (job.user.getUsedToday() + 1 >= job.maxUserCount ? ":arrow_up: " : "")
+								+ (job.user.getUsedToday() + 1) + "/" + job.maxUserCount, true);
+						frameEmbed.appendField("Server Extraction Count",
+								(job.guild.getUsedToday() + 1 >= job.guild.getRequestLimit() ? ":arrow_up: " : "") + (job.guild.getUsedToday() + 1)
+										+ "/" + job.guild.getRequestLimit(),
+								true);
 					}
 					IMessage message = RequestBuffer.request(() -> {
 						try
@@ -534,7 +542,7 @@ public class Extractor
 						}
 						return null;
 					}).get();
-					if(message != null)
+					if (message != null)
 					{
 						logger.info("{} Uploaded", job.video.getNickname());
 					}
@@ -542,8 +550,9 @@ public class Extractor
 					{
 						job.message.getChannel().sendMessage("Frame was not Extracted!");
 					}
-					db.declareExtraction(completionTimestamp, job.elevated, job.author.getLongID(), job.message.getGuild().getLongID(), job.message.getChannel().getLongID(),
-							job.message.getLongID(), job.video.getFilename(), offsetTime, job.frameCount, message.getEmbeds().get(0).getImage().getUrl());
+					db.declareExtraction(completionTimestamp, job.elevated, job.author.getLongID(), job.message.getGuild().getLongID(),
+							job.message.getChannel().getLongID(), job.message.getLongID(), job.video.getFilename(), startTime, job.frameCount,
+							message.getEmbeds().get(0).getImage().getUrl());
 				}
 				else
 				{
@@ -627,14 +636,14 @@ public class Extractor
 		 * [video duration] <-Priority
 		 * [format duration]
 		 */
-		String command = "" + prop.getProperty("FFprobe_Path")
+		String command = "" + escapeFilepath(prop.getProperty("FFprobe_Path"))
 				+ " -v error -show_entries format=duration:stream=r_frame_rate:stream=duration -select_streams v:0 -print_format default=noprint_wrappers=1:nokey=1 -sexagesimal "
-				+ video.getAbsolutePath();
+				+ escapeFilepath(video.getAbsolutePath());
 		try
 		{
 			logger.info("Command: >{}", command);
 			Process r = Runtime.getRuntime().exec(command);
-			StreamGobbler eater = new StreamGobbler(r.getErrorStream(), false);
+			StreamGobbler eater = new StreamGobbler(r.getErrorStream(), true);
 			BufferedReader reader = new BufferedReader(new InputStreamReader(r.getInputStream()));
 			eater.start();
 			int exitValue = -1;
@@ -756,21 +765,18 @@ public class Extractor
 			{
 				firstIndex = 1;
 			}
-			secondsT = text.substring(Math.max(decimalIndex - 2, firstIndex), decimalIndex);
-			if (decimalIndex > (3 + firstIndex))
+			int secondsColonIndex = text.lastIndexOf(':', decimalIndex);
+			secondsT = text.substring(Math.max(secondsColonIndex + 1, firstIndex), decimalIndex);
+			if (secondsColonIndex >= firstIndex)//Minutes should exist
 			{
-				if (text.charAt(decimalIndex - 3) != ':')
-					throw new IllegalArgumentException("Colon Splitting Minutes with Seconds is not Present!");
-				minutesT = text.substring(Math.max(decimalIndex - 5, firstIndex), decimalIndex - 3);
-				if (decimalIndex > (6 + firstIndex))
+				int minutesColonIndex = text.lastIndexOf(':', secondsColonIndex - 1);
+				minutesT = text.substring(Math.max(minutesColonIndex + 1, firstIndex), secondsColonIndex);
+				if (minutesColonIndex >= firstIndex)
 				{
-					if (text.charAt(decimalIndex - 6) != ':')
-						throw new IllegalArgumentException("Colon Splitting Hours with Minutes is not Present!");
-					hoursT = text.substring(firstIndex, decimalIndex - 6);
-
+					hoursT = text.substring(firstIndex, minutesColonIndex);
 				}
 			}
-			if (decimalIndex < text.length() - 1 + firstIndex)
+			if (decimalIndex < text.length() - 1)
 			{
 				millisecondsT = text.substring(decimalIndex + 1, Math.min(decimalIndex + 4, text.length()));
 			}
@@ -780,7 +786,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Hours `" + hoursT + "` contained non-numeric characters in Timecode: <" + text + ">");
+				throw new IllegalArgumentException("Hours `" + hoursT + "` is not a valid number in Timecode: <" + text + ">");
 			}
 			try
 			{
@@ -788,7 +794,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Minutes `" + minutesT + "` contained non-numeric characters in Timecode: <" + text + ">");
+				throw new IllegalArgumentException("Minutes `" + minutesT + "` is not a valid number in Timecode: <" + text + ">");
 			}
 			try
 			{
@@ -796,7 +802,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Seconds `" + secondsT + "` contained non-numeric characters in Timecode: <" + text + ">");
+				throw new IllegalArgumentException("Seconds `" + secondsT + "` is not a valid number in Timecode: <" + text + ">");
 			}
 			try
 			{
@@ -804,7 +810,7 @@ public class Extractor
 			}
 			catch (NumberFormatException e)
 			{
-				throw new IllegalArgumentException("Milliseconds `" + millisecondsT + "` contained non-numeric characters in Timecode: <" + text + ">");
+				throw new IllegalArgumentException("Milliseconds `" + millisecondsT + "` is not a valid number in Timecode: <" + text + ">");
 			}
 			if (framerate != null && frameCount != null)
 			{
@@ -819,9 +825,9 @@ public class Extractor
 			}
 			return timecode;
 		}
-		catch (IndexOutOfBoundsException | NumberFormatException e)
+		catch (IndexOutOfBoundsException e)
 		{
-			throw new IllegalArgumentException();
+			throw new IllegalArgumentException("Error Parsing Timecode, Check Console :radioactive:");
 		}
 	}
 
@@ -839,6 +845,23 @@ public class Extractor
 		{
 			logger.error("Database not initalized yet", f);
 			client.changePresence(StatusType.INVISIBLE);
+		}
+	}
+	
+	public static String escapeFilepath(String path)
+	{
+		String os = System.getProperty("os.name");
+		if (os.equalsIgnoreCase("Linux") || os.equalsIgnoreCase("Mac OS X"))
+		{
+			return path.trim().replaceAll(" ", "\\ ");
+		}
+		else if (os.startsWith("Win"))
+		{
+			return '\"' + path.trim() + '\"';
+		}
+		else
+		{
+			return path.trim();
 		}
 	}
 

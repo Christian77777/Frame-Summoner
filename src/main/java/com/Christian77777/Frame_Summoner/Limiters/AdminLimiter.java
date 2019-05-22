@@ -5,8 +5,7 @@
 package com.Christian77777.Frame_Summoner.Limiters;
 
 import java.util.ArrayList;
-import java.util.List;
-import com.Christian77777.Frame_Summoner.Database;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.limiter.Limiter;
 import sx.blah.discord.handle.obj.IGuild;
@@ -53,20 +52,20 @@ public class AdminLimiter implements Limiter
 		{
 			RequestBuffer.request(() -> {
 				ctx.getAuthor().getOrCreatePMChannel()
-						.sendMessage(":no_entry: You must be an :a: Admin of the " + ctx.getGuild().getName() + " Server to use this Command here");
+						.sendMessage(":no_entry: You must be an :a: Admin of the `" + ctx.getGuild().getName() + "` Server to use this Command in `" + ctx.getChannel().getName() + "`");
 			});
 		}
 		else
 		{
 			RequestBuffer.request(() -> {
 				ctx.getChannel()
-						.sendMessage(":no_entry: You must be an :a: Admin of the " + ctx.getGuild().getName() + " Server to use this Command here");
+						.sendMessage(":no_entry: You must be an :a: Admin of the `" + ctx.getGuild().getName() + "` Server to use this Command here");
 			});
 		}
 	}
 
 	/**
-	 * Check if User has the required admin role
+	 * Check if User has the required admin role, no Server Owner check
 	 * @param guild Guild the message was required
 	 * @param user User that sent the message
 	 * @return if user had the required roles
@@ -74,6 +73,8 @@ public class AdminLimiter implements Limiter
 	public static boolean checkAdmin(Database db, IGuild guild, IUser user)
 	{
 		ArrayList<Long> actualRoles = new ArrayList<Long>();
+		if(guild == null)
+			return false;
 		//Insertion Sort, for sorting the admin roles in ascending order. Using Insertion Sort because iteration is already required to extract the actual Longs
 		for (IRole r : user.getRolesForGuild(guild))
 		{
