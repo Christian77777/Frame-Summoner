@@ -412,6 +412,7 @@ public class UserActivity
 		String detailedDescription = "Extracts a Frame from specified video at the timecode and uploads it to Discord.\nUsage: `" + usage
 				+ "`\n*[Filename]* = Name of Video, use `" + prefix
 				+ "list` to see avaliable Videos\n*[Timecode]* = Timestamp of Frame desired, in this format `##:##:##.###`, use Youtube to help find desired Timestamp\n*<-f Frame Number>* = Precise way to pick timestamp, by additionally moving forward -f number of frames from the Timestamp\n*<-o>* = __Advanced__ Ignores video link offset. Not Recommended\n - Extraction limit in place to prevent abuse";
+
 		detailedDescription += appendAliases(aliases);
 		Options options = new Options();
 		options.addOption(Option.builder("o").desc("Ignores Preset Offset when used").longOpt("offset").build());
