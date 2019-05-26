@@ -4,7 +4,7 @@
 
 package com.Christian77777.Frame_Summoner.Limiters;
 
-import com.Christian77777.Frame_Summoner.Database;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.darichey.discord.CommandContext;
 import com.darichey.discord.limiter.Limiter;
 import sx.blah.discord.util.RequestBuffer;
@@ -52,7 +52,7 @@ public class TierLimiter implements Limiter
 		else
 			RequestBuffer.request(() -> {
 				ctx.getAuthor().getOrCreatePMChannel().sendMessage(":no_entry: The `" + command + "` command can not be used in the `"
-						+ ctx.getGuild().getName() + "` Server for this Channel: `" + ctx.getChannel().getName() + "`");
+						+ ctx.getChannel().getName() + "` Channel for this Server: `" + ctx.getGuild().getName() + "`");
 			});
 	}
 

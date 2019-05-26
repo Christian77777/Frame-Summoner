@@ -39,6 +39,7 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import com.Christian77777.Frame_Summoner.Database.DBChannel;
 import com.Christian77777.Frame_Summoner.Database.DBVideo;
 import com.Christian77777.Frame_Summoner.Listeners.ChannelDeleted;
@@ -63,7 +64,7 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static final String version = new String("2.0.0");
+	public static final String version = new String("2.1.0");
 	public static final String prefix = new String("fs!");
 	public static LocalInterface menu;
 	private UserActivity instructions;
@@ -86,6 +87,7 @@ public class DRI implements IListener<ReadyEvent>
 		System.setProperty("directory", dir);
 		logger = LogManager.getLogger();
 		logger.info("Directory resolved to: {}", dir);
+		logger.info("Running on OS: {}", System.getProperty("os.name"));
 		checkIfSingleInstance();
 		//Read Config and refresh database local data before interfacing with Discord
 		DRI controller = new DRI();
@@ -97,7 +99,7 @@ public class DRI implements IListener<ReadyEvent>
 	 * Read in the Config,
 	 * Create the Frame-cache folder if necessary
 	 * Establish the Database connection
-	 * TODO Refresh Video Files
+	 * Refresh Video Files
 	 * End with Terminating Connection Call
 	 */
 	public DRI()
@@ -336,74 +338,76 @@ public class DRI implements IListener<ReadyEvent>
 					}
 				}
 				value = prop.getProperty("MaxUserExtracts");
-				try
+				if (value != null)
 				{
-					Byte.parseByte(value);
-				}
-				catch (NullPointerException | NumberFormatException e)
-				{
-					logger.error("Config not properly configured, \nKey: `MaxUserExtracts` is not a number less then 128");
-					readFailed = true;
+					try
+					{
+						Byte.parseByte(value);
+					}
+					catch (NullPointerException | NumberFormatException e)
+					{
+						logger.error("Config not properly configured, \nKey: `MaxUserExtracts` is not a number less then 128");
+						readFailed = true;
+					}
 				}
 				value = prop.getProperty("MaxServerExtracts");
-				try
+				if (value != null)
 				{
-					Integer.parseInt(value);
-				}
-				catch (NullPointerException | NumberFormatException e)
-				{
-					logger.error("Config not properly configured, \nKey: `MaxServerExtracts` is not a number less then 2 million");
-					readFailed = true;
+					try
+					{
+						Integer.parseInt(value);
+					}
+					catch (NullPointerException | NumberFormatException e)
+					{
+						logger.error("Config not properly configured, \nKey: `MaxServerExtracts` is not a number less then 2 million");
+						readFailed = true;
+					}
 				}
 				value = prop.getProperty("FFmpeg_Path");
-				if (value != null && !new File(value).exists())
+				if (value != null)
 				{
-					logger.error("Config not properly configured, \nKey: `FFmpeg_Path` is not a valid file path");
-					readFailed = true;
-				}
-				try
-				{
-					Process x = Runtime.getRuntime().exec(value);
-					StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
-					StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
-					reader.start();
-					eater.start();
-					if (x.waitFor(100, TimeUnit.MILLISECONDS))
-						logger.info("{} recognized", value);
-					else
-						logger.info("{} accepted", value);
+					try
+					{
+						Process x = Runtime.getRuntime().exec(Extractor.escapeFilepath(value));
+						StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
+						StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
+						reader.start();
+						eater.start();
+						if (x.waitFor(100, TimeUnit.MILLISECONDS))
+							logger.info("{} recognized", value);
+						else
+							logger.info("{} accepted", value);
 
-				}
-				catch (InterruptedException | IOException e)
-				{
-					logger.error("{} rejected", value);
-					logger.fatal("File Path for FFmpeg is not an executable, please put the correct path in the values.txt file and restart.");
-					readFailed = true;
+					}
+					catch (InterruptedException | IOException e)
+					{
+						logger.error("{} rejected", value);
+						logger.fatal("File Path for FFmpeg is not an executable, please put the correct path in the values.txt file and restart.");
+						readFailed = true;
+					}
 				}
 				value = prop.getProperty("FFprobe_Path");
-				if (value != null && !new File(value).exists())
+				if (value != null)
 				{
-					logger.error("Config not properly configured, \nKey: `FFprobe_Path` is not a valid file path");
-					readFailed = true;
-				}
-				try
-				{
-					Process x = Runtime.getRuntime().exec(value);
-					StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
-					StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
-					reader.start();
-					eater.start();
-					if (x.waitFor(100, TimeUnit.MILLISECONDS))
-						logger.info("{} recognized", value);
-					else
-						logger.info("{} accepted", value);
+					try
+					{
+						Process x = Runtime.getRuntime().exec(Extractor.escapeFilepath(value));
+						StreamGobbler reader = new StreamGobbler(x.getInputStream(), false);
+						StreamGobbler eater = new StreamGobbler(x.getErrorStream(), false);
+						reader.start();
+						eater.start();
+						if (x.waitFor(100, TimeUnit.MILLISECONDS))
+							logger.info("{} recognized", value);
+						else
+							logger.info("{} accepted", value);
 
-				}
-				catch (InterruptedException | IOException e)
-				{
-					logger.error("{} rejected", value);
-					logger.fatal("File Path for FFprobe is not an executable, please put the correct path in the values.txt file and restart.");
-					readFailed = true;
+					}
+					catch (InterruptedException | IOException e)
+					{
+						logger.error("{} rejected", value);
+						logger.fatal("File Path for FFprobe is not an executable, please put the correct path in the values.txt file and restart.");
+						readFailed = true;
+					}
 				}
 				value = prop.getProperty("Video_Directory");
 				if (value != null && !new File(value).exists() && !new File(value).isDirectory())
