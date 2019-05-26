@@ -5,7 +5,7 @@ package com.Christian77777.Frame_Summoner.Listeners;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import com.Christian77777.Frame_Summoner.Database;
+import com.Christian77777.Frame_Summoner.Database.Database;
 import sx.blah.discord.api.events.IListener;
 import sx.blah.discord.handle.impl.events.guild.GuildLeaveEvent;
 
