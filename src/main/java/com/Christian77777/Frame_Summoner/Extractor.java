@@ -491,9 +491,6 @@ public class Extractor
 				{
 					EmbedBuilder frameEmbed = new EmbedBuilder();
 					frameEmbed.withColor(new Color(152, 146, 251));
-					frameEmbed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
-					frameEmbed.withAuthorName("FoxTrot Fanatics");
-					frameEmbed.withAuthorUrl("https://foxtrotfanatics.info");
 					if (job.link != null)
 					{
 						frameEmbed.withTitle(job.link.getTitle());
