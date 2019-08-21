@@ -1,20 +1,20 @@
 /**
  * Copyright 2018 Christian Devile
  * 
- * This file is part of FTUServerBot.
+ * This file is part of Frame-Summoner.
  * 
- * FTUServerBot is free software: you can redistribute it and/or modify
+ * Frame-Summoner is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  * 
- * FTUServerBot is distributed in the hope that it will be useful,
+ * Frame-Summoner is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  * 
  * You should have received a copy of the GNU General Public License
- * along with FTUServerBot. If not, see <http://www.gnu.org/licenses/>.
+ * along with Frame-Summoner. If not, see <http://www.gnu.org/licenses/>.
  */
 
 package com.Christian77777.Frame_Summoner;
@@ -64,7 +64,7 @@ public class DRI implements IListener<ReadyEvent>
 	private static Logger logger;
 	public static String dir;
 	private static FileLock lock;
-	public static final String version = new String("2.1.0");
+	public static final String version = new String("2.2.0");
 	public static final String prefix = new String("fs!");
 	public static LocalInterface menu;
 	private UserActivity instructions;
@@ -205,6 +205,7 @@ public class DRI implements IListener<ReadyEvent>
 	 * If video removed, mark as unusable
 	 * If new video found, ignore, require manual addition.
 	 * Just remark its existence in the console.
+	 * Does not read video, 
 	 */
 	public void refreshVideos()
 	{
@@ -221,7 +222,7 @@ public class DRI implements IListener<ReadyEvent>
 			while (cache.size() > lIndex && realFiles.length > rIndex)
 			{
 				int comparision = cache.get(lIndex).getFilename().compareTo(realFiles[rIndex]);
-				if (comparision > 0)//cache missing item from realFiles
+				if (comparision > 0)//cache missing item, from realFiles
 				{
 					newFiles.add(realFiles[rIndex]);
 					rIndex++;
@@ -267,6 +268,7 @@ public class DRI implements IListener<ReadyEvent>
 			}
 			logger.info("Lost Files: {}", Arrays.toString(unusable.toArray()));
 			logger.info("New Files Found: {}", Arrays.toString(newFiles.toArray()));
+			logger.info("Currently Disabled Videos: {}", Arrays.toString(db.getDisabledList().toArray()));
 		}
 	}
 

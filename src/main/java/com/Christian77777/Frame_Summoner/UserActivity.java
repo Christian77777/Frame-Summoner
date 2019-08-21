@@ -1863,9 +1863,6 @@ public class UserActivity
 					else if (line.hasOption('b'))
 					{
 						EmbedBuilder embed = new EmbedBuilder();
-						embed.withAuthorName("FoxTrot Fanatics");
-						embed.withAuthorUrl("https://foxtrotfanatics.info");
-						embed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 						embed.withTitle("__Frame-Summoner Discord Bot__");
 						embed.withDesc("This bot provides access to Upscaled Frames of Video");
 						embed.withUrl("https://github.com/Christian77777/Frame-Summoner");
@@ -2725,9 +2722,6 @@ public class UserActivity
 							DBLink data = links.get(0);
 							String linkText = data.getLink() + (line.hasOption('t') ? "?t=" + (time / 1000) : "");
 							EmbedBuilder embed = new EmbedBuilder();
-							embed.withAuthorName("FoxTrot Fanatics");
-							embed.withAuthorUrl("https://foxtrotfanatics.info");
-							embed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 							embed.withTitle(data.getTitle());
 							if (data.getDescription() != null)
 								embed.withDesc(data.getDescription());
@@ -3237,7 +3231,7 @@ public class UserActivity
 				args.remove(0);
 			if (args.size() == 0)
 			{
-				db.checkChannelPermission(ctx.getChannel().getLongID(), 3);
+				db.updateChannelTier(ctx.getChannel().getLongID(), ctx.getGuild().getLongID(), 3);
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage(
 							":one: __Frame-Summoner Server Setup Guide__ - **START HERE** :checkered_flag:\nThis guide is for :a: Admins of a server that just added Frame-Summoner, to learn how to configure it. :tools:\nNormal server members should not bother with this guide. :no_pedestrians:\nThis First page of the guide will summarise all the controls avaliable to you, while further pages will walk you though how to do everything.\nEvery page on this guide can be accessed by simplying doing `"
@@ -3301,7 +3295,7 @@ public class UserActivity
 						page = ":moneybag: __Frame-Summoner Server Setup Guide__ - **Profit**\nExecute `" + prefix
 								+ "info -s` one last time to see if the Server is configured as you want.\nOtherwise, thats it, congrats, the bot is now setup.\nPeople can start using it already, if you gave them permission to do so.\n\nThe Last important thing to do, is to annouce to everyone the bot exists.\nI recommend you include in your annoucement to use `"
 								+ prefix
-								+ "help` as a starting point for everyone who wants to use the bot.\n:large_orange_diamond: VIPs may be in your server that can help normal people with further questions.\nIf any :a: Admins have further questions, bring them up in <#523724442615021583>\n\nYou can change server settings at any time, just use the commands learned.\nA much more condensed reference guide for setup can be found with `"
+								+ "help` as a starting point for everyone who wants to use the bot.\n:large_orange_diamond: VIPs may be in your server that can help normal people with further questions.\nIf any :a: Admins have further questions, bring them up in <#613123830239461443>\n\nYou can change server settings at any time, just use the commands learned.\nA much more condensed reference guide for setup can be found with `"
 								+ prefix + "guide setup`\n";
 						break;
 					default:
@@ -3339,9 +3333,6 @@ public class UserActivity
 		SimpleBindings sb = new SimpleBindings();
 		EmbedBuilder eb = new EmbedBuilder();
 		eb.withColor(new Color(0, 255, 255));
-		eb.withAuthorName("FoxTrot Fanatics");
-		eb.withAuthorUrl("https://foxtrotfanatics.info");
-		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Initalization Guide");
 		eb.withDesc("How to setup the bot in your Server - Admin Only");
@@ -3376,9 +3367,6 @@ public class UserActivity
 		sb.put("setup", eb);
 		eb = new EmbedBuilder();
 		eb.withColor(new Color(0, 255, 255));
-		eb.withAuthorName("FoxTrot Fanatics");
-		eb.withAuthorUrl("https://foxtrotfanatics.info");
-		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Frame Extraction Guide");
 		eb.withDesc("How to extract a frame using Frame-Summoner");
@@ -4081,9 +4069,6 @@ public class UserActivity
 		for (int z = 0; z < pageCount; z++)
 		{
 			EmbedBuilder message = new EmbedBuilder();
-			message.withAuthorName("FoxTrot Fanatics");
-			message.withAuthorUrl("https://foxtrotfanatics.info");
-			message.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 			message.withTitle(title);
 			message.withDesc(desc);
 			if (thumbnail != null)
