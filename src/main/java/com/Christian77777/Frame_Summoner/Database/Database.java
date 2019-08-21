@@ -61,7 +61,7 @@ public class Database
 			psRecordExtraction, psUpdateUserDailyUsage, psUpdateAllUserDailyUsage, psGetServerUsage, psUpdateServerDailyUsage,
 			psUpdateAllServerDailyUsage, psUpdateServerDailyLimit, psUpdateServerStanding, psSetChannelAnnoucementsFalse, psGetLinkByName,
 			psGetLinkByTitle, psCreateLink, psDeleteLink1, psDeleteLink2, psDeleteLink3, psUpdateOffset, psGetAllChannels, psBanUser, psUnbanUser,
-			psGetCurrentRecord, psGetArchivedRecord, psGetFullUserData;
+			psGetCurrentRecord, psGetArchivedRecord, psGetFullUserData, psGetDisabledList;
 
 	public static void main(String[] args) throws SQLException
 	{
@@ -230,6 +230,10 @@ public class Database
 			psGetAllChannels.close();
 			psBanUser.close();
 			psUnbanUser.close();
+			psGetCurrentRecord.close();
+			psGetArchivedRecord.close();
+			psGetFullUserData.close();
+			psGetDisabledList.close();
 			c.close();
 			logger.info("Database closed");
 		}
@@ -1059,6 +1063,32 @@ public class Database
 		lock.unlock();
 		return result;
 	}
+	
+	/**
+	 * Gets all the disabled videos in the Database
+	 * @return DBVideo Object array sorted alphabetically
+	 */
+	public ArrayList<DBVideo> getDisabledList()
+	{
+		ArrayList<DBVideo> result = new ArrayList<DBVideo>();
+		lock.lock();
+		try
+		{
+			ResultSet rs = psGetDisabledList.executeQuery();
+			while (rs.next())//Exists at all
+			{
+				result.add(new DBVideo(rs.getString(1), rs.getString(2), rs.getLong(3), rs.getLong(4), rs.getString(5), rs.getBoolean(6),
+						rs.getBoolean(7), rs.getBoolean(8)));
+			}
+			rs.close();
+		}
+		catch (SQLException e)
+		{
+			logger.catching(e);
+		}
+		lock.unlock();
+		return result;
+	}
 
 	/**
 	 * Changes a Videos Usability status, if deleted, or corrupted (can't probe time length), or reverified
@@ -1762,6 +1792,7 @@ public class Database
 		psSetChannelAnnoucementsFalse = c.prepareStatement("UPDATE `ChannelPerms` SET `Annoucements` = 0 WHERE `ChannelID` = ?");
 		psGetVideoList = c.prepareStatement(
 				"SELECT `Filename`, `Nickname`, `Length`, `Offset`, `Fps`, `Restricted`, `Usable`, `Linked` FROM `Videos` ORDER BY `Filename` ASC;");
+		psGetDisabledList = c.prepareStatement("SELECT `Filename`, `Nickname`, `Length`, `Offset`, `Fps`, `Restricted`, `Usable`, `Linked` FROM `Videos` WHERE `Usable` = 0 ORDER BY `Filename` ASC;");
 		psSetVideoUsability = c.prepareStatement("UPDATE `Videos` SET `Usable` = ? WHERE `Nickname` = ?;");
 		psSetVideoRestricted = c.prepareStatement("UPDATE `Videos` SET `Restricted` = ? WHERE `Nickname` = ?;");
 		psSetAllVideosRestricted = c.prepareStatement("UPDATE `Videos` SET `Restricted` = ?");
