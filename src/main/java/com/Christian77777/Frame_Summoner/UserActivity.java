@@ -3231,7 +3231,7 @@ public class UserActivity
 				args.remove(0);
 			if (args.size() == 0)
 			{
-				db.checkChannelPermission(ctx.getChannel().getLongID(), 3);
+				db.updateChannelTier(ctx.getChannel().getLongID(), ctx.getGuild().getLongID(), 3);
 				RequestBuffer.request(() -> {
 					ctx.getChannel().sendMessage(
 							":one: __Frame-Summoner Server Setup Guide__ - **START HERE** :checkered_flag:\nThis guide is for :a: Admins of a server that just added Frame-Summoner, to learn how to configure it. :tools:\nNormal server members should not bother with this guide. :no_pedestrians:\nThis First page of the guide will summarise all the controls avaliable to you, while further pages will walk you though how to do everything.\nEvery page on this guide can be accessed by simplying doing `"
@@ -3295,7 +3295,7 @@ public class UserActivity
 						page = ":moneybag: __Frame-Summoner Server Setup Guide__ - **Profit**\nExecute `" + prefix
 								+ "info -s` one last time to see if the Server is configured as you want.\nOtherwise, thats it, congrats, the bot is now setup.\nPeople can start using it already, if you gave them permission to do so.\n\nThe Last important thing to do, is to annouce to everyone the bot exists.\nI recommend you include in your annoucement to use `"
 								+ prefix
-								+ "help` as a starting point for everyone who wants to use the bot.\n:large_orange_diamond: VIPs may be in your server that can help normal people with further questions.\nIf any :a: Admins have further questions, bring them up in <#523724442615021583>\n\nYou can change server settings at any time, just use the commands learned.\nA much more condensed reference guide for setup can be found with `"
+								+ "help` as a starting point for everyone who wants to use the bot.\n:large_orange_diamond: VIPs may be in your server that can help normal people with further questions.\nIf any :a: Admins have further questions, bring them up in <#613123830239461443>\n\nYou can change server settings at any time, just use the commands learned.\nA much more condensed reference guide for setup can be found with `"
 								+ prefix + "guide setup`\n";
 						break;
 					default:
