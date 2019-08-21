@@ -1863,9 +1863,6 @@ public class UserActivity
 					else if (line.hasOption('b'))
 					{
 						EmbedBuilder embed = new EmbedBuilder();
-						embed.withAuthorName("FoxTrot Fanatics");
-						embed.withAuthorUrl("https://foxtrotfanatics.info");
-						embed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 						embed.withTitle("__Frame-Summoner Discord Bot__");
 						embed.withDesc("This bot provides access to Upscaled Frames of Video");
 						embed.withUrl("https://github.com/Christian77777/Frame-Summoner");
@@ -2725,9 +2722,6 @@ public class UserActivity
 							DBLink data = links.get(0);
 							String linkText = data.getLink() + (line.hasOption('t') ? "?t=" + (time / 1000) : "");
 							EmbedBuilder embed = new EmbedBuilder();
-							embed.withAuthorName("FoxTrot Fanatics");
-							embed.withAuthorUrl("https://foxtrotfanatics.info");
-							embed.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 							embed.withTitle(data.getTitle());
 							if (data.getDescription() != null)
 								embed.withDesc(data.getDescription());
@@ -3339,9 +3333,6 @@ public class UserActivity
 		SimpleBindings sb = new SimpleBindings();
 		EmbedBuilder eb = new EmbedBuilder();
 		eb.withColor(new Color(0, 255, 255));
-		eb.withAuthorName("FoxTrot Fanatics");
-		eb.withAuthorUrl("https://foxtrotfanatics.info");
-		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Initalization Guide");
 		eb.withDesc("How to setup the bot in your Server - Admin Only");
@@ -3376,9 +3367,6 @@ public class UserActivity
 		sb.put("setup", eb);
 		eb = new EmbedBuilder();
 		eb.withColor(new Color(0, 255, 255));
-		eb.withAuthorName("FoxTrot Fanatics");
-		eb.withAuthorUrl("https://foxtrotfanatics.info");
-		eb.withAuthorIcon("https://storage.googleapis.com/ftf-public/CYTUBE/imgs/ftf_logo.png");
 		//eb.withUrl("");
 		eb.withTitle("Frame Extraction Guide");
 		eb.withDesc("How to extract a frame using Frame-Summoner");
@@ -4081,9 +4069,6 @@ public class UserActivity
 		for (int z = 0; z < pageCount; z++)
 		{
 			EmbedBuilder message = new EmbedBuilder();
-			message.withAuthorName("FoxTrot Fanatics");
-			message.withAuthorUrl("https://foxtrotfanatics.info");
-			message.withAuthorIcon("https://media.foxtrotfanatics.info/i/ftf_logo.png");
 			message.withTitle(title);
 			message.withDesc(desc);
 			if (thumbnail != null)

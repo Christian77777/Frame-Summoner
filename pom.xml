@@ -10,7 +10,6 @@
 
 	<name>Frame-Summoner</name>
 	<description>Discord Bot Server to extract frames from videos when requested without providing the literal videos</description>
-	<url>http://www.foxtrotfanatics.info</url>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -77,7 +76,7 @@
 				<version>3.1.1</version> <executions> <execution> <phase>package</phase> 
 				<goals> <goal>shade</goal> </goals> <configuration> <finalName>${project.artifactId}-${project.version}-something</finalName> 
 				<outputDirectory>../guide</outputDirectory> <transformers> <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer"> 
-				<manifestEntries> <Main-Class>com.FTUServerBot.main.DRI</Main-Class> <Build-Number>123</Build-Number> 
+				<manifestEntries> <Main-Class>com.Frame-Summoner.main.DRI</Main-Class> <Build-Number>123</Build-Number> 
 				</manifestEntries> </transformer> </transformers> </configuration> </execution> 
 				</executions> </plugin> -->
 			<plugin>
@@ -131,4 +130,5 @@
 			</resource>
 		</resources>
 	</build>
+	<url>https://github.com/Christian77777/Frame-Summoner</url>
 </project>
